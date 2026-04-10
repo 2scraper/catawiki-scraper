@@ -1,228 +1,226 @@
-# Tokopedia Scraper
+# 🏛️ Catawiki Scraper
 
-Open-source web scraper for [Tokopedia](https://www.tokopedia.com) — Indonesia's largest e-commerce platform. Extract product data from **all 20+ categories** with built-in CAPTCHA solving, proxy rotation, fingerprint evasion, and anti-detect browser support.
+**Open-source web scraper for [Catawiki](https://www.catawiki.com) auction listings.**  
+Extract lots, bids, prices, images, and seller data — across every category.
 
-Three implementations included: **Playwright** (recommended), **Selenium**, and **Pyppeteer** (Puppeteer for Python).
+Three browser-automation engines. One unified interface.
 
-> **Part of the [2scraper](https://github.com/2scraper) collection** — production-ready scrapers powered by [2captcha.com](https://2captcha.com) and [2prx.com](https://2prx.com).
-
----
-
-## Features
-
-| Feature | Details |
-|---|---|
-| **20+ categories** | Electronics, Fashion, Beauty, Automotive, Gaming, and more |
-| **3 browser engines** | Playwright (primary), Selenium, Pyppeteer |
-| **CAPTCHA solving** | Cloudflare Turnstile, reCAPTCHA v2, hCaptcha via [2captcha.com](https://2captcha.com) |
-| **Proxy support** | Residential & datacenter proxies via [2prx.com](https://2prx.com) |
-| **Fingerprint evasion** | Stealth JS injection — hides webdriver flags, spoofs navigator properties |
-| **Anti-detect browser** | Connect to any CDP-compatible anti-detect browser |
-| **Output formats** | JSON, CSV, or both |
-| **Pagination** | Infinite-scroll handling with configurable page limits |
-| **Human-like behavior** | Random delays, user-agent rotation |
+| Engine | Script | Async | Best For |
+|--------|--------|-------|----------|
+| **Playwright** ⭐ | `catawiki_playwright.py` | ✅ | Speed, reliability, modern API |
+| **Selenium** | `catawiki_selenium.py` | ❌ | Legacy stacks, CI pipelines |
+| **Puppeteer** (Pyppeteer) | `catawiki_puppeteer.py` | ✅ | Node.js ecosystem familiarity |
 
 ---
 
-## Data Points Extracted
+## ✨ Features
 
-Each scraped product includes:
-
-- **Product name**
-- **Current price** & **original price**
-- **Discount percentage**
-- **Rating** & **units sold**
-- **Shop name** & **shop location**
-- **Product image URL**
-- **Product page URL**
-- **Category** & **timestamp**
-
-### Sample Output (JSON)
-
-```json
-{
-  "name": "Samsung Galaxy S24 Ultra 12/256GB",
-  "price": "Rp17.999.000",
-  "original_price": "Rp21.999.000",
-  "discount": "18%",
-  "rating": "4.9",
-  "sold": "2rb+",
-  "shop_name": "Samsung Official Store",
-  "shop_location": "Jakarta Utara",
-  "image_url": "https://images.tokopedia.net/...",
-  "product_url": "https://www.tokopedia.com/...",
-  "category": "electronics",
-  "timestamp": "2025-06-15T12:30:00+00:00"
-}
-```
+- **All categories** — art, watches, jewellery, coins, cars, and 25+ more
+- **Deep scraping** — listing pages + individual lot details (title, description, specs, images, seller)
+- **CAPTCHA bypass** — automatic Turnstile / reCAPTCHA / hCaptcha solving via [2captcha.com](https://2captcha.com)
+- **Proxy support** — residential & datacenter proxies via [2prx.com](https://2prx.com)
+- **Fingerprint randomisation** — rotating User-Agent, viewport, timezone, locale
+- **Anti-detection** — webdriver flag masking, `undetected-chromedriver` (Selenium), stealth init scripts
+- **Flexible output** — JSON or CSV with timestamped filenames
+- **Pagination** — automatic multi-page traversal with configurable depth
+- **Human-like delays** — randomised timing between requests
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. Install
+### 1. Clone the repo
 
 ```bash
-git clone https://github.com/2scraper/tokopedia-scraper.git
-cd tokopedia-scraper
+git clone https://github.com/2scraper/catawiki-scraper.git
+cd catawiki-scraper
+```
+
+### 2. Install dependencies
+
+```bash
 pip install -r requirements.txt
 
-# Playwright only — install browser binaries:
+# For Playwright — install browser binaries:
 playwright install chromium
 ```
 
-### 2. Configure (optional)
-
-Set environment variables for enhanced capabilities:
+### 3. Set your API keys (optional but recommended)
 
 ```bash
-# CAPTCHA solving (get your key at https://2captcha.com)
-export TWOCAPTCHA_API_KEY="your_api_key_here"
-
-# Proxy rotation (get credentials at https://2prx.com)
-export PROXY_URL="http://user:pass@gate.2prx.com:9999"
-
-# Anti-detect browser (optional)
-export ANTIDETECT_BROWSER_WS="ws://127.0.0.1:9222"
+export TWOCAPTCHA_API_KEY="your_2captcha_api_key"   # https://2captcha.com
+export PROXY_URL="http://user:pass@host:port"        # https://2prx.com
 ```
 
-### 3. Run
+### 4. Run
 
-**Playwright** (recommended):
 ```bash
-# Scrape specific categories
-python scraper_playwright.py --categories electronics fashion-men --pages 3 --output json
+# Playwright (recommended)
+python catawiki_playwright.py --all --pages 3 --format json
 
-# Scrape ALL categories
-python scraper_playwright.py --all --pages 5 --output both
-```
+# Selenium
+python catawiki_selenium.py --categories art watches --pages 5 --format csv
 
-**Selenium:**
-```bash
-python scraper_selenium.py --categories beauty health --pages 3 --output csv
-```
-
-**Pyppeteer:**
-```bash
-python scraper_puppeteer.py --all --pages 2 --output json
+# Puppeteer
+python catawiki_puppeteer.py --categories jewellery --details --headed
 ```
 
 ---
 
-## Available Categories
+## 📋 CLI Options
 
-| Key | Tokopedia Category |
-|---|---|
-| `electronics` | Elektronik |
-| `mobile-tablets` | Handphone & Tablet |
-| `laptops-computers` | Laptop & Aksesoris |
-| `fashion-men` | Fashion Pria |
-| `fashion-women` | Fashion Wanita |
-| `beauty` | Kecantikan |
-| `health` | Kesehatan |
-| `home-living` | Rumah Tangga |
-| `baby-kids` | Ibu & Bayi |
-| `food-drinks` | Makanan & Minuman |
-| `sports` | Olahraga |
-| `automotive` | Otomotif |
-| `books-stationery` | Buku |
-| `toys-hobbies` | Mainan & Hobi |
-| `office-industrial` | Office & Industrial |
-| `cameras` | Kamera |
-| `gaming` | Gaming |
-| `pets` | Perawatan Hewan |
-| `travel` | Travel & Aktivitas |
-| `tickets-vouchers` | Tiket & Voucher |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--categories` | Space-separated list of categories to scrape | — |
+| `--all` | Scrape ALL categories | `false` |
+| `--pages` | Max listing pages per category | `3` |
+| `--format` | Output format: `json` or `csv` | `json` |
+| `--details` | Also visit each lot's detail page | `false` |
+| `--headed` | Show the browser window (useful for debugging) | `false` |
 
 ---
 
-## CLI Options
+## 🗂️ Available Categories
 
 ```
---categories KEY [KEY ...]   Category keys to scrape (see table above)
---all                        Scrape all categories
---pages N                    Number of pages per category (default: 5)
---output {json,csv,both}     Output format (default: json)
---output-dir PATH            Output directory (default: ./output)
+antiques        art              books-comics     cars-motorcycles
+ceramics-glass  coins-banknotes  collectibles     diamonds-gemstones
+dolls-bears     fashion          furniture        jewellery
+lamps           memorabilia      militaria        model-cars
+music           photography      pottery          rugs-textiles
+science-technology  sculptures   silver           sports
+stamps          toys             vinyl-music      watches
+wine-whisky
 ```
 
 ---
 
-## Architecture
+## 📦 Output Format
+
+### JSON
+
+```json
+[
+  {
+    "title": "Pablo Picasso (1881-1973) - Femme assise",
+    "url": "https://www.catawiki.com/l/12345678",
+    "price": "€ 2,400",
+    "bids": "23 bids",
+    "closing_time": "2h 15m",
+    "image_url": "https://assets.catawiki.com/...",
+    "category": "art"
+  }
+]
+```
+
+### CSV
+
+| title | url | price | bids | closing_time | image_url | category |
+|-------|-----|-------|------|--------------|-----------|----------|
+| Pablo Picasso … | https://… | € 2,400 | 23 bids | 2h 15m | https://… | art |
+
+With `--details`, additional fields are included: `description`, `current_bid`, `seller`, `specifications`, `images`.
+
+---
+
+## 🔐 CAPTCHA Solving with 2captcha.com
+
+Catawiki may serve Cloudflare Turnstile or reCAPTCHA challenges. This scraper automatically detects and solves them using the [2captcha.com](https://2captcha.com) API.
+
+1. Sign up at [2captcha.com](https://2captcha.com)
+2. Copy your API key from the dashboard
+3. Set the environment variable:
+
+```bash
+export TWOCAPTCHA_API_KEY="your_key_here"
+```
+
+Supported CAPTCHA types: Turnstile, reCAPTCHA v2/v3, hCaptcha.
+
+---
+
+## 🌐 Proxy Support via 2prx.com
+
+Route requests through residential or datacenter proxies from [2prx.com](https://2prx.com) to avoid IP bans and geo-restrictions.
+
+```bash
+export PROXY_URL="http://user:pass@gate.2prx.com:9090"
+```
+
+The proxy integrates natively with all three scraper engines.
+
+---
+
+## 🕵️ Anti-Detection & Fingerprinting
+
+All three scrapers include built-in anti-detection measures:
+
+- **User-Agent rotation** — random desktop UA on each run
+- **Viewport randomisation** — realistic screen sizes
+- **Timezone & locale spoofing** (Playwright)
+- **WebDriver flag masking** — `navigator.webdriver` returns `undefined`
+- **Chrome runtime emulation** — `window.chrome.runtime` stub
+- **Plugin count spoofing** — non-zero `navigator.plugins`
+
+For maximum stealth, consider the **2captcha Anti-Detect Browser** — a premium Chromium-based browser with hardware-level fingerprint masking. [Learn more →](https://2captcha.com)
+
+Set `FINGERPRINT_ENABLED=false` to disable built-in fingerprinting.
+
+---
+
+## 🏗️ Project Structure
 
 ```
-tokopedia-scraper/
-├── config.py                # Shared config, models, 2captcha integration
-├── scraper_playwright.py    # Playwright implementation (primary)
-├── scraper_selenium.py      # Selenium implementation
-├── scraper_puppeteer.py     # Pyppeteer implementation
+catawiki-scraper/
+├── catawiki_playwright.py   # ⭐ Primary scraper (async, Playwright)
+├── catawiki_selenium.py     # Selenium scraper (sync)
+├── catawiki_puppeteer.py    # Pyppeteer scraper (async)
+├── config.py                # Shared configuration, helpers, 2captcha integration
+├── requirements.txt         # Python dependencies
 ├── output/                  # Scraped data lands here
-├── requirements.txt
+│   ├── catawiki_20250410_143022.json
+│   └── catawiki_20250410_143022.csv
 └── README.md
 ```
 
-All three scrapers share `config.py` which provides:
+---
 
-- **`Product`** data model with `.to_dict()` serialization
-- **`CaptchaSolver`** class — unified 2captcha.com API client (Turnstile, reCAPTCHA, hCaptcha)
-- **`CATEGORIES`** map of all Tokopedia categories
-- **`FINGERPRINT_JS`** stealth injection script
-- **Output helpers** — `save_json()`, `save_csv()`
-- **Utility functions** — `random_delay()`, `random_ua()`
+## ⚙️ Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `TWOCAPTCHA_API_KEY` | API key from [2captcha.com](https://2captcha.com) | No (but recommended) |
+| `PROXY_URL` | Proxy URL from [2prx.com](https://2prx.com) — `http://user:pass@host:port` | No |
+| `FINGERPRINT_ENABLED` | Enable fingerprint randomisation (`true`/`false`) | No (default: `true`) |
 
 ---
 
-## Integrations
+## 🤝 Contributing
 
-### CAPTCHA Solving — 2captcha.com
+Contributions are welcome! Please open an issue or submit a pull request.
 
-When Tokopedia or Cloudflare presents a challenge, the scraper automatically detects and solves it using the [2captcha.com](https://2captcha.com) API. Supported types:
-
-- Cloudflare Turnstile
-- reCAPTCHA v2
-- hCaptcha
-
-Set your API key: `export TWOCAPTCHA_API_KEY="your_key"`
-
-### Proxy Rotation — 2prx.com
-
-Avoid IP bans with residential and datacenter proxies from [2prx.com](https://2prx.com). The proxy URL format is:
-
-```
-http://username:password@gate.2prx.com:9999
-```
-
-Set via: `export PROXY_URL="http://user:pass@gate.2prx.com:9999"`
-
-### Anti-Detect Browser
-
-For maximum stealth, connect the scraper to a CDP-compatible anti-detect browser. This routes all scraping through a browser environment with unique fingerprints — canvas, WebGL, fonts, timezone, and more.
-
-Set via: `export ANTIDETECT_BROWSER_WS="ws://127.0.0.1:9222"`
-
-Contact us at [2captcha.com](https://2captcha.com) for our anti-detect browser solution.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes
+4. Push and open a PR
 
 ---
 
-## Tips for Reliable Scraping
+## 📄 License
 
-1. **Always use proxies** — Tokopedia rate-limits aggressively. Residential proxies from [2prx.com](https://2prx.com) give the best success rate.
-2. **Enable CAPTCHA solving** — Cloudflare Turnstile blocks are common. A [2captcha.com](https://2captcha.com) key ensures uninterrupted scraping.
-3. **Start small** — Test with 1–2 categories and 2 pages before running a full scrape.
-4. **Use Playwright** — It's the fastest and most reliable of the three implementations.
-5. **Respect Tokopedia's terms of service** — This tool is intended for research and personal use.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-## License
+## 🔗 Links
 
-MIT — see [LICENSE](LICENSE).
-
----
-
-## Links
-
-- **Landing page**: [2captcha.com/tokopedia-scraper](https://2captcha.com/tokopedia-scraper)
-- **CAPTCHA solving API**: [2captcha.com](https://2captcha.com)
+- **Repository**: [github.com/2scraper/catawiki-scraper](https://github.com/2scraper/catawiki-scraper)
+- **CAPTCHA solving**: [2captcha.com](https://2captcha.com)
 - **Proxy service**: [2prx.com](https://2prx.com)
-- **More scrapers**: [github.com/2scraper](https://github.com/2scraper)
+- **Anti-Detect Browser**: [2captcha.com](https://2captcha.com)
+
+---
+
+<p align="center">
+  Built with ❤️ by <a href="https://github.com/2scraper">2scraper</a> · Powered by <a href="https://2captcha.com">2captcha.com</a>
+</p>
