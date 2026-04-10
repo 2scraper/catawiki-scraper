@@ -1,4 +1,18 @@
+# Catawiki Scraper — Dependencies
+# Install: pip install -r requirements.txt
+
+# === Playwright (primary) ===
 playwright>=1.44.0
+
+# === Selenium ===
 selenium>=4.20.0
+undetected-chromedriver>=3.5.5
+
+# === Puppeteer (Pyppeteer) ===
 pyppeteer>=2.0.0
-requests>=2.31.0
+
+# === 2captcha.com CAPTCHA solving ===
+2captcha-python>=1.5.0
+
+# === Utilities ===
+# (csv, json, argparse, logging are stdlib)
