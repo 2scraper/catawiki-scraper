@@ -386,7 +386,7 @@ running rather than data changing: a lot's `bid_kind` moving `current` →
 ## Testing
 
 ```bash
-python3 smoke_test.py        # 465 offline checks, no engine library needed
+python3 smoke_test.py        # 460+ offline checks, no engine library needed
 pytest                       # the same checks, wrapped as one test
 python3 env_config.py        # what config was picked up, without secrets
 ```
