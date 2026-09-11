@@ -38,9 +38,10 @@ dev = ["pytest>=7.0"]
 # This repo is a flat collection of standalone scripts, not a package
 # directory — list them explicitly rather than relying on setuptools'
 # flat-layout auto-discovery, which refuses to guess among this many
-# top-level modules. smoke_test.py is excluded on purpose: it is a runner
-# invoked as a script (see CONTRIBUTING.md), not a module an installed
-# dependency would import.
+# top-level modules. smoke_test.py and make_fixtures.py are excluded on
+# purpose: both are runners invoked as scripts (see CONTRIBUTING.md), not
+# modules an installed dependency would import — and make_fixtures.py needs
+# captures the repository does not carry.
 py-modules = [
     "captcha_solver",
     "diff_runs",

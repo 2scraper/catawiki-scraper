@@ -56,7 +56,7 @@ Not because these do not matter, but because they belong somewhere else:
 - **Bypassing Catawiki's bot protection.** This scraper drives an ordinary
   browser and passes challenges the way a browser does. Anything about how
   Akamai or reCAPTCHA behave is not a vulnerability in this repository.
-- **The scraper stopped working.** Etsy changing its markup is expected —
+- **The scraper stopped working.** Catawiki changing its markup is expected —
   file it as a normal issue, there is a template for exactly that.
 - **Anything about 2Captcha's services** — the solver API, the Scraping Browser
   API, proxies, fingerprints, billing, quotas. This repository is only a client

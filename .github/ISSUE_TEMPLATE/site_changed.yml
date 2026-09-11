@@ -1,28 +1,44 @@
 name: Site changed / selectors broke
-description: Etsy changed something and the parser no longer matches.
+description: Catawiki changed something and the parser no longer matches.
 labels: ["site-change"]
 body:
   - type: markdown
     attributes:
       value: |
-        This is the most common way a scraper stops working, and it is worth its
-        own report because the fix is different from a code bug: something on
-        etsy.com moved.
+        This is the most common way a scraper stops working, and it is worth
+        its own report because the fix is different from a code bug:
+        something on catawiki.com moved.
 
-        Useful to know before filing: the parser tries **JSON-LD first**, then a
-        CSS + URL-pattern fallback. Which one broke narrows the fix a lot.
+        Useful to know before filing, because it narrows the fix a lot — this
+        parser reads **two different sources for two halves of a row**:
+
+        - **The rows** come from the site's own SSR payload,
+          `<script id="__NEXT_DATA__">`, which is in the first response and
+          needs no JavaScript. Titles, ids, urls, images, auction ids and the
+          reserve flag all come from there.
+        - **The money** comes from the rendered card
+          (`.c-lot-card__price` and its siblings), because the payload does
+          not carry it: bids arrive at hydration.
+
+        So "no rows at all" and "rows with no prices" are two different
+        breakages with two different fixes, and `price_source` on the rows
+        tells you which happened: `next_data+dom` is healthy, `next_data`
+        means nothing hydrated.
 
   - type: dropdown
     id: what_broke
     attributes:
       label: What stopped matching
       options:
-        - Products (0 rows on a page that visibly has products)
-        - A specific field is null or wrong (price, sku, image, URL)
-        - original_price or lowest_price_30d empty out (the tile overlay)
-        - DOM price confirmation dropped below 90% in the run log
-        - Pagination stops early or repeats a page
-        - The captcha detector finds nothing on a page that has one
+        - No rows at all on a page that visibly has lots (the payload moved)
+        - Rows come out with no prices (the card, or its price class, moved)
+        - bid_kind is null on rows that have a price (the status label moved)
+        - A null price with no reserve_price_set flag (the invariant broke)
+        - favorite_count empty on every row (the card's counter moved)
+        - Pagination stops early, repeats a page, or runs past the 100 cap
+        - A lot page returns nothing (--mode lot)
+        - The auctions index returns nothing (--mode auctions)
+        - A no-results search returns 24 suggested lots as if they were real
         - Something else
     validations:
       required: true
@@ -31,8 +47,11 @@ body:
     id: url
     attributes:
       label: URL
-      description: The exact listing URL, and the country your exit IP was in.
-      placeholder: "https://www.etsy.com/search?q=handmade+mug (locale: /de/, exit IP: DE residential, Scraping Browser pid: etsy1)"
+      description: >-
+        The exact URL, its locale prefix, and how the browser was reached.
+        Please say whether the run was headful or over --cdp-endpoint: a
+        headless run is refused by the site and is not a parser problem.
+      placeholder: "https://www.catawiki.com/en/c/333-watches (locale: /en/, headful local Chrome, exit: NL residential)"
     validations:
       required: true
 
@@ -41,12 +60,15 @@ body:
     attributes:
       label: Evidence from the page
       description: |
-        Whichever of these you can get. A capture beats a description.
+        Whichever of these you can get. A capture beats a description, and
+        `--dump-html` writes one on success as well as on failure.
 
-        - JSON-LD as the page actually serves it:
-          `python3 -c "import json,sys,re;h=open('dump.html').read();print([m[:400] for m in re.findall(r'<script type=\"application/ld\\+json\">(.*?)</script>',h,re.S)][:2])"`
-        - Or open devtools and paste one `Product` node from the `ItemList`.
-        - For a field problem: the value you got, and the value on the page.
+        - The payload as the page actually serves it:
+          `python3 -c "import json,re;h=open('dump.html').read();d=json.loads(re.search(r'id=.__NEXT_DATA__.[^>]*>(.*?)</script>',h,1).group(1));print(sorted(d['props']['pageProps']))"`
+        - For a price problem: one whole `article.c-lot-card__container` from
+          devtools, and the amount the page shows for that lot.
+        - For a `bid_kind` problem: the exact label the card prints
+          ("Current bid", "Aktuelles Gebot", ...) and the locale.
       render: text
     validations:
       required: true
@@ -56,5 +78,5 @@ body:
     attributes:
       label: Anything else
       description: >-
-        Whether it reproduces on a second engine, whether it reproduces from a
-        different country, and when it last worked.
+        Whether it reproduces on a second engine, whether it reproduces in a
+        second locale, and when it last worked.

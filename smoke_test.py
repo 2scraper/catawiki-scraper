@@ -10,8 +10,8 @@ is guarded and the skip is reported at the end - a suite that silently skips
 part of itself and still says "all passed" is the same defect as code that
 reports success without checking what it wanted actually happened.
 
-Every fixture below was cut from a real capture in ../captures/ by
-../make_fixtures.py, which verifies that the trim parses IDENTICALLY to the
+Every fixture below was cut from a real capture by `make_fixtures.py`, which
+is shipped beside this file and verifies that the trim parses IDENTICALLY to the
 untrimmed original -- price, bid kind, title, favourites, reserve flag and
 image url -- before it is embedded here. That check has already earned its
 keep: a first attempt kept only the first locale bundle of the page's own

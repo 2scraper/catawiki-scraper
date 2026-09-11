@@ -238,8 +238,9 @@ classes worth knowing:
 
 * **A fixture check fails after you regenerate a fixture.** The fixtures are
   cut from real captures and verified to parse identically to the untrimmed
-  original. Regenerate with `make_fixtures.py` in the working directory
-  above the repo rather than editing the literals by hand — an early hand
+  original. Regenerate with `make_fixtures.py` (shipped, but it
+  needs your own captures in `../captures/` — see its docstring) rather than
+  editing the literals by hand — an early hand
   attempt kept only the first locale bundle of the translation store and
   produced a Japanese fixture whose `bid_kind` was null on every row.
 * **A signature or flag-parity check fails.** Those exist because two of
