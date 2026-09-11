@@ -397,11 +397,29 @@ material is replaced with placeholders and guarded by patterns: a lot page's
 payload carries a per-bidder token, and an auction card names the human who
 curated it.
 
-CI runs the offline suite on the oldest and newest supported Python, builds
-and runs the Docker image, and runs a daily canary against a real category URL
-with at least three pages. The canary skips with a notice rather than failing
-when its secret is absent, because a check that is always red teaches everyone
-to ignore checks.
+CI runs the offline suite on the oldest and newest supported Python, and builds
+**and runs** the Docker image — its entrypoint, a real Chromium launch, and a
+check that no `.env`, test suite or fixture was baked in.
+
+**What the canary badge here does and does not mean.** The workflow is a real
+three-page run against a real category URL, with a floor on the rows, the
+reserve invariant, page+position uniqueness and a dozen other assertions. But
+this repository deliberately holds **no live credential**, so the live steps
+are skipped and the job goes green with a `::notice::` saying why — a check
+that is always red teaches everyone to ignore checks, and a check that is
+always green teaches the same lesson more quietly. So read the green canary
+badge as *"the workflow is wired up"*, not as *"the site was verified today"*.
+
+To make it do real work in your own fork, set one secret and change nothing
+else:
+
+```bash
+gh secret set CATAWIKI_CDP_ENDPOINT --repo <your-org>/catawiki-scraper
+```
+
+Use a `pid` reserved for CI: a Scraping Browser profile allows one live
+connection, so a canary sharing a pid with a person's run gets
+`profile_locked` and reports a failure that has nothing to do with the site.
 
 ---
 
