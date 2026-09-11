@@ -8,8 +8,8 @@ the identifier the README already tells people to diff on for price
 monitoring and assortment tracking, but that nothing in this repo actually
 computed.
 
-    python3 diff_runs.py --old girls_clothing.2026-09-01.json \\
-                          --new girls_clothing.2026-09-07.json
+    python3 diff_runs.py --old watches.2026-09-01.json \\
+                          --new watches.2026-09-07.json
 
 Typical use is a scheduled re-run of one of the four scraper engines, kept
 under a dated filename, diffed against the previous one:

@@ -10,26 +10,33 @@ body:
         mask credentials in their own logs, but raw HTML dumps and the Scraper
         API's `x-debug` header do not. Replace them with `***`.
 
-        Two things answer most reports faster than we can:
+        A few things answer most reports faster than we can:
 
-        - **Everything exit 3?** Check the exit address first. Etsy's
-          DataDome answers every datacentre and VPN IP with HTTP 403, so a run
-          from a VPS or a CI runner is blocked whatever else is set. If the
-          log says `t=bv`, a captcha key does not help — that challenge is
-          not solvable. The Scraping Browser API (`--cdp-endpoint`) is the
-          path that works; if a profile keeps refusing after three retries,
-          try a different `pid`.
-        - **Zero products?** You may be on a page that has none — a taxonomy
-          hub, or one page past the end of a listing. It answers 200 with
-          nothing on it, which is exit 4 and a correct answer. See
-          [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
-        - **`rating` empty on every row?** That is expected on a listing run:
-          Etsy publishes no per-listing rating there. The stars you see on a
-          tile are the shop's and are in `shop_rating`. See the README.
-        - **Wrong currency or language?** Etsy decides both from your exit
-          IP, not from the URL — a request for `/fr/…` from a German exit is
-          redirected to `/de/…`. The row's `url` says which storefront
-          actually answered.
+        - **Everything exit 3?** Check whether the run was **headless** before
+          you check anything else. Akamai refuses a headless browser on this
+          site whatever the exit address — measured HTTP 403 from four
+          residential exits and one datacentre address, against HTTP 200 and
+          the full catalogue from those very same addresses with a real
+          window. `--headful` is the default here; a proxy does not fix it,
+          and `--cdp-endpoint` is the other path measured to work.
+        - **`price` null on some rows?** That is almost certainly correct:
+          every blank price is a lot whose reserve has not been met, and the
+          row carries `reserve_price_set: true` to say so. What is NOT
+          correct is a null price with no reserve flag — that one is worth
+          this issue.
+        - **Zero rows?** You may be on a page that has none: one page past the
+          end of a listing, or a search that matched nothing (that one answers
+          200 with "No results" **and 24 suggested lots**, which this scraper
+          deliberately does not parse). Both are exit 4 and correct answers.
+          See [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
+        - **`rating` and `review_count` empty on every row?** Expected: this
+          site publishes no per-lot rating. The seller's feedback is in
+          `seller_score` and `seller_feedback_count` on a `--mode lot` row.
+        - **The run stopped at page 100?** That is the site's own cap, not a
+          bug. Past it the site returns page 100's own lots under HTTP 200.
+        - **Wrong language?** The locale is a path segment (`/en/`, `/nl/`,
+          `/de/`), not something the exit IP decides. Prices are in euro on
+          all 18 locales.
 
   - type: dropdown
     id: engine
@@ -77,7 +84,7 @@ body:
       render: shell
       placeholder: |
         python3 playwright_scraper.py \
-          --url "https://www.etsy.com/search?q=handmade+mug" \
+          --url "https://www.catawiki.com/en/c/333-watches" \
           --pages 3 --out grills
     validations:
       required: true
