@@ -594,21 +594,6 @@ def _mask_credentials(text: str) -> str:
     return _CREDENTIALS_IN_URL_RE.sub(r"\1***:***@", text or "")
 
 
-    """The page's HTML, or None when it cannot be read right now.
-
-    Playwright RAISES rather than returning empty while a navigation is in
-    flight ("Unable to retrieve content because the page is navigating"), and
-    a DataDome interstitial resolves by navigating — so the one moment this
-    is called is the one moment it can fail. Returning None keeps
-    `page_flow.settle_datadome` waiting instead of crashing the run, which is
-    what the first live run of this engine did.
-    """
-    try:
-        return page.content()
-    except (PWError, PWTimeout):
-        return None
-
-
 def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     """page.content() that tolerates a page mid-navigation.
 

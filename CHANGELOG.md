@@ -11,6 +11,28 @@ or an empty column.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fifteen lines of unreachable code removed from `playwright_scraper.py`.**
+  A function's `def` line had been lost at some point before this repo's
+  first commit, leaving its docstring and its `try: return page.content()`
+  body indented into the end of `_mask_credentials`, where the control flow
+  can never arrive. Nothing called it — `_content_when_settled` below it
+  does the job — so no behaviour changes. The same fifteen lines, byte for
+  byte, were in six repos of this family.
+
+### Added
+
+- **A check for a statement the control flow can never reach.** The
+  undefined-name walk beside it cannot see this class by design: it pools
+  every binding in a file rather than tracking scopes, so a name used inside
+  dead code passes as long as anything else in the module binds it. The new
+  one is narrow — a statement after a `return`/`raise`/`break`/`continue` in
+  the SAME block — and measured across the eighteen repos of this family it
+  found six real problems and zero false positives. Verified by control:
+  appending `return 1` followed by a statement turns the suite red.
+
+
 ## [0.1.0] — 2026-09-11
 
 First release. Rewritten from the original generated scripts as a member of
