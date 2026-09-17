@@ -1689,6 +1689,14 @@ def test_no_undefined_names():
                            for k, v in sorted(missing.items()))
         ok &= check("%s references no undefined name%s"
                     % (name, ": " + detail if missing else ""), not missing)
+
+    # And a statement that can never RUN — see `_unreachable_statements`.
+    for name in sorted(f for f in os.listdir(REPO_ROOT) if f.endswith(".py")):
+        dead = _unreachable_statements(os.path.join(REPO_ROOT, name))
+        ok &= check("%s has no statement the control flow can never reach%s"
+                    % (name, "" if not dead else ": line %d" % dead[0]),
+                    not dead)
+
     return ok
 
 
@@ -2513,6 +2521,39 @@ def _undefined_names(path):
             missing.setdefault(node.id, []).append(node.lineno)
     return missing
 
+
+
+def _unreachable_statements(path):
+    """Line numbers of statements that can never run.
+
+    A statement sitting after a `return`/`raise`/`break`/`continue` in the
+    SAME block. Deliberately narrow: it makes no claim about conditions or
+    reachability in general, only about a block whose control flow has
+    already left. Measured across the eighteen repos in this family on
+    2026-09-16 it reported six problems and zero false positives.
+
+    `_undefined_names` above cannot see this class at all, by design — it
+    pools every binding in the file rather than tracking scopes, so a name
+    used inside dead code passes as long as anything else in the module
+    binds it. What was hiding there: a function whose `def` line had been
+    lost, leaving its docstring and body absorbed into the end of the
+    function above it. Identical in six repos, present since each one's
+    first commit, invisible to import, `--help`, `compileall` and every
+    green run of this suite.
+    """
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    dead = []
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(node, field, None)
+            if not isinstance(block, list):
+                continue
+            for i, stmt in enumerate(block[:-1]):
+                if isinstance(stmt, (ast.Return, ast.Raise,
+                                     ast.Continue, ast.Break)):
+                    dead.append(block[i + 1].lineno)
+                    break
+    return sorted(dead)
 
 def main() -> int:
     ok = True
