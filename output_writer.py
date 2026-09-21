@@ -374,6 +374,33 @@ EXIT_API_ERROR = 5
 EXIT_PARTIAL = 6
 
 
+# Exit code for a run that never GOT its pages: a navigation timeout, a dead
+# or unauthenticated proxy, a DNS failure, or an edge answering with
+# something that is not the page that was asked for.
+#
+# Distinct from EXIT_NO_PRODUCTS because those are opposite facts. Exit 4 is
+# a statement about the CATALOGUE — "we asked, and the answer was nothing" —
+# so handing it to a run that never reached the site tells a pipeline the
+# listing is empty when nothing was read at all.
+#
+# 5 rather than a new number, and 5 rather than EXIT_PARTIAL:
+#
+#   * this family's contract already reserves 5 for a transport failure
+#     (scraper_api_client has used it for a remote API error since it was
+#     written), so this needs no new code and no per-repo table for a caller
+#     driving more than one of these scrapers;
+#   * EXIT_PARTIAL (6) means "some rows were gathered and the output is
+#     incomplete". A run holding nothing writes no output at all, so a
+#     consumer that reads the file on a 6 finds either nothing or the
+#     PREVIOUS run's good data, which `save` deliberately does not
+#     overwrite. Exit 5 promises no file.
+#
+# Deliberately NOT applied when rows WERE gathered: a timeout on page 7 of
+# 10 is a partial run (exit 6, output written), which is already right. This
+# decides only what a run holding nothing reports.
+EXIT_FETCH_FAILED = 5
+
+
 def write_run_meta(out_prefix: str, meta: dict) -> str:
     """Write a run-metadata sidecar next to the output, return its path.
 
@@ -538,9 +565,28 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
             extra=extra))
 
     if not rows:
-        # Nothing gathered at all: a challenge outranks "empty result",
-        # because it says something stood between the run and the content.
-        return EXIT_BLOCKED if blocked else rc
+        # Nothing gathered at all, and WHY decides the code. The three
+        # outcomes are different facts and a pipeline branches on them
+        # (blocked is not empty is not "never reached"):
+        #
+        #   blocked            something stood between the run and the content
+        #   did not complete   we never got the pages — a dead proxy, a load
+        #                      timeout, an edge serving something else
+        #   completed          we asked, and the answer was nothing
+        #
+        # Keyed on `not complete` rather than on a list of stop reasons, on
+        # purpose: a list cannot cover a reason nobody has added to it yet,
+        # so a new one falls silently through to "the catalogue is empty" —
+        # which is the defect this branch exists to prevent.
+        if blocked:
+            return EXIT_BLOCKED
+        if not complete:
+            print(f"[!] Nothing was gathered and the run did not finish "
+                  f"({stop_reason}) — exit {EXIT_FETCH_FAILED}, NOT an empty "
+                  f"result (exit {EXIT_NO_PRODUCTS}). Nothing can be "
+                  f"concluded about the catalogue from this run.")
+            return EXIT_FETCH_FAILED
+        return rc
     if not complete:
         print(f"[!] Partial run: stopped after {pages_completed} of "
               f"{pages_requested} page(s) ({stop_reason}). The output holds "
