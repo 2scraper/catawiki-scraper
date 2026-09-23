@@ -13,6 +13,15 @@ or an empty column.
 
 ### Fixed
 
+- **The canary runs daily again, with no secret.** It was dispatch-only,
+  gated on a Scraping Browser endpoint that does not survive a day, and the
+  suite pinned "no cron" — so it ran once, on 2026-09-11, and never again
+  while every sibling's canary ran daily. The xvfb route that the workflow
+  called "plausible but unverified" has now been run on a stock GitHub
+  runner: headful Chromium under `xvfb-run`, no credential, 72 lots over 3
+  pages, every assertion green. That route is now the scheduled one, with no
+  skip path; `route=cdp` on a manual dispatch still uses the secret.
+
 - **Fifteen lines of unreachable code removed from `playwright_scraper.py`.**
   A function's `def` line had been lost at some point before this repo's
   first commit, leaving its docstring and its `try: return page.content()`
