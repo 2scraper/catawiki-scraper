@@ -401,20 +401,21 @@ CI runs the offline suite on the oldest and newest supported Python, and builds
 **and runs** the Docker image — its entrypoint, a real Chromium launch, and a
 check that no `.env`, test suite or fixture was baked in.
 
-**What the canary badge here does and does not mean.** The workflow is a real
-three-page run against a real category URL, with a floor on the rows, the
-reserve invariant, page+position uniqueness and a dozen other assertions. But
-this repository deliberately holds **no live credential**, so the live steps
-are skipped and the job goes green with a `::notice::` saying why — a check
-that is always red teaches everyone to ignore checks, and a check that is
-always green teaches the same lesson more quietly. So read the green canary
-badge as *"the workflow is wired up"*, not as *"the site was verified today"*.
+**What the canary badge here means.** The workflow is a real three-page run
+against a real category URL, with a floor on the rows, the reserve invariant,
+page+position uniqueness and a dozen other assertions — and it runs **daily,
+from a stock GitHub runner, with no secret**. Akamai refuses a headless browser
+here, so the canary runs a real headful Chromium inside a virtual display
+(`xvfb-run`). Its first run that way, on 2026-09-23, fetched 72 lots over 3
+pages, 72 of them priced, `status=complete`. So a green badge means the site
+was parsed that morning; a red one means something changed.
 
-To make it do real work in your own fork, set one secret and change nothing
-else:
+The Scraping Browser route is kept for a manual check, but it is not what the
+schedule runs, because an endpoint credential here does not last a day:
 
 ```bash
 gh secret set CATAWIKI_CDP_ENDPOINT --repo <your-org>/catawiki-scraper
+gh workflow run canary.yml --repo <your-org>/catawiki-scraper -f route=cdp
 ```
 
 Use a `pid` reserved for CI: a Scraping Browser profile allows one live

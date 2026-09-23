@@ -1209,17 +1209,26 @@ def test_canary_separates_access_from_defect():
     ok &= check("the reason access is not a defect is written down",
                 "ACCESS CONDITIONS ARE NOT DEFECTS" in wf)
 
-    # NO SCHEDULE, and the reason has to travel with the decision. A daily
-    # cron against a credential that does not survive a day gives either a
-    # permanently red badge or a permanently green one that tested nothing —
-    # and the green is worse, because it reads as "the parser still works".
-    # Restoring the cron is a legitimate change the day a long-lived
-    # credential exists; this check makes it a decision rather than a habit.
-    ok &= check("the canary has no cron schedule",
-                not re.search(r"^\s*-\s*cron:", wf, re.M))
+    # A DAILY SCHEDULE, ON A ROUTE THAT NEEDS NO CREDENTIAL. For v0.1.x the
+    # canary was dispatch-only around a Scraping Browser secret that does not
+    # survive a day, and this check pinned "no cron" -- so it ran once
+    # (2026-09-11) and never again. Headful Chromium under xvfb on a stock
+    # runner was then measured to pass every assertion with no secret at all
+    # (2026-09-23, 72 rows over 3 pages), so the canary runs daily on that
+    # route and must not be gated on a secret, nor skip when one is absent.
+    ok &= check("the canary has a daily cron schedule",
+                bool(re.search(r"^\s*-\s*cron:\s*\"\d+ \d+ \* \* \*\"", wf, re.M)))
     ok &= check("it is dispatchable by hand", "workflow_dispatch:" in wf)
-    ok &= check("and the reason the schedule is off is written down",
-                "does not survive a day" in wf)
+    ok &= check("a scheduled run takes the local (credential-free) route",
+                "ROUTE: ${{ inputs.route || 'local' }}" in wf)
+    ok &= check("the local route runs a real window under xvfb",
+                "xvfb-run" in wf and "--headful" in wf)
+    ok &= check("no step is gated on the secret being present (no skip path)",
+                "HAVE_CDP" not in wf and "Skipping the live run" not in wf)
+    ok &= check("the secret cannot leak into the local route",
+                "unset CATAWIKI_CDP_ENDPOINT" in wf)
+    ok &= check("the reason the cdp route is not scheduled is written down",
+                "does not survive a" in wf)
     ok &= check("the expired-secret case is named",
                 "expired" in wf.lower() and "refresh" in wf.lower())
     return ok
