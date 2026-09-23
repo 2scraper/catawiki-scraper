@@ -13,6 +13,17 @@ or an empty column.
 
 ### Fixed
 
+- **The Scraper API path (`scraper_api_client.py`) failed whenever a wait flag
+  was given, and never saw the target's status.** Measured 2026-09-23 against
+  the live `/tasks/sync` endpoint: `waitFor` sent as a JSON-encoded string
+  (what this client sent) is answered HTTP 422 "params.waitFor must be an
+  object" and is still billed ($0.0005); sent as an object it is answered
+  HTTP 200. It is now an object. And the response's `status` is the API's own
+  verdict ("success"), while the target site's HTTP code is `http_code` — the
+  client handed `status` onward, so a target 403/503 never reached the page
+  classifier. It now reads `http_code`, falling back to `status` only if that
+  is an integer. After the fix, one live call (`--wait-text Watches` on the README's watches category) answered HTTP 200, upstream 200, 24 rows.
+
 - **Fifteen lines of unreachable code removed from `playwright_scraper.py`.**
   A function's `def` line had been lost at some point before this repo's
   first commit, leaving its docstring and its `try: return page.content()`
