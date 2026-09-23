@@ -44,6 +44,9 @@ or an empty column.
   found six real problems and zero false positives. Verified by control:
   appending `return 1` followed by a statement turns the suite red.
 
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+
 
 ## [0.1.0] — 2026-09-11
 
