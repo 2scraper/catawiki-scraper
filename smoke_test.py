@@ -1327,8 +1327,8 @@ def test_no_capture_leaks():
                 "(%d fixtures, %d chars)" % (len(names), len(fixtures)),
                 len(names) >= 3 and len(fixtures) > 30000)
     # Guarded with PATTERNS rather than with the literals a previous capture
-    # happened to contain, so the NEXT capture is checked too. MediaMarkt's
-    # pages embed a front-end configuration blob — a Sentry DSN, a Woosmap
+    # happened to contain, so the NEXT capture is checked too. On a sibling
+    # site (mediamarkt-scraper) the pages embed a front-end configuration blob — a Sentry DSN, a Woosmap
     # public key, a store-code JWT — none of which is needed to test a
     # parser, and none of which belongs in a public repository.
     patterns = {

@@ -23,8 +23,6 @@ links before paying, `page_flow.SOLVES_PER_PAGE` caps a page at one
 purchase, and `page_flow.STATE_POLICY` — not this file — decides which state
 is worth money at all.
 
-There is deliberately no DataDome path here. See "No DataDome solver" below.
-
 Flow:
   1. Both detectors run and are reconciled (see reconcile_detections) to decide
      the variant: v3, v2-invisible or v2-checkbox. The parameters differ per

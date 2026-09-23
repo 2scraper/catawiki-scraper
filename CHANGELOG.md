@@ -21,6 +21,18 @@ or an empty column.
   does the job — so no behaviour changes. The same fifteen lines, byte for
   byte, were in six repos of this family.
 
+- **Donor leftovers removed.** The bug-report template's example wrote
+  `--out grills` and expected Farfetch's "96 products, as the README says a
+  category page yields"; it now uses `--out watches` and this README's 24
+  lots per category page. `captcha_solver.py`'s docstring pointed at a "No
+  DataDome solver" section that does not exist in this repo (Catawiki is
+  fronted by Akamai, and no DataDome path was ever here). A comment in
+  `output_writer.py` used `shop_rating`, a column this repo does not have,
+  as its example sidecar field; it now names `scroll`, which the engines
+  really write. A smoke-test comment described "MediaMarkt's pages" without
+  saying it was a sibling site; it now does. CONTRIBUTING's "the
+  registration form" is generalised.
+
 ### Added
 
 - **A check for a statement the control flow can never reach.** The
@@ -31,6 +43,9 @@ or an empty column.
   the SAME block — and measured across the eighteen repos of this family it
   found six real problems and zero false positives. Verified by control:
   appending `return 1` followed by a statement turns the suite red.
+
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
 
 
 ## [0.1.0] — 2026-09-11
