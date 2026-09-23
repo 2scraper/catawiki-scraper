@@ -26,95 +26,75 @@ name: canary
 # scored -- and there are only two ways for a runner to get in: the Scraping
 # Browser API, or a real window under xvfb.
 #
-# This canary gates on CATAWIKI_CDP_ENDPOINT, the measured-working path. The
-# xvfb route is deliberately NOT used yet: it is plausible, since headful
-# passes even from a datacentre-classified address, but it has not been run
-# on an actual runner, and a canary built on an unverified assumption is a
-# check nobody can trust.
+# THE XVFB ROUTE IS THE CANARY. It was left unverified when this file was
+# first written, and the canary was made dispatch-only around a credential
+# instead -- which meant it ran once (2026-09-11) and never again. Measured
+# 2026-09-23 on a stock ubuntu-latest runner, NO secret of any kind: headful
+# Chromium under xvfb-run fetched /en/c/333-watches pages 1-3, 24 lots each,
+# 634 KB snapshots, 72 rows, 72/72 priced, status=complete, every assertion
+# below green (run 35870364274). So the runner's address is not the gate here
+# either; the display is, and xvfb supplies one.
 #
-# The live steps are SKIPPED, not failed, when the secret is absent. The job
-# goes green with a notice saying why. A check that is always red teaches
-# everyone to ignore checks, which is worse than having no check at all. Set
-# the secret and the same workflow starts doing real work with no edit:
+# That settles how this workflow is shaped:
 #
-#     gh secret set CATAWIKI_CDP_ENDPOINT --repo 2scraper/catawiki-scraper
+#   * It runs DAILY. A canary that can pass without a credential should never
+#     be gated on one -- ungated, the badge going red is the site changing,
+#     retested every morning without anyone remembering to.
+#   * The local route needs no secret, so there is NO skip path. A skip would
+#     make the badge green on days nothing was tested.
+#   * The Scraping Browser route is kept, but only on request: dispatch with
+#     `route: cdp` and a CATAWIKI_CDP_ENDPOINT secret set. It is NOT the
+#     scheduled route, because an endpoint on this account does not survive a
+#     day (every credential inherited from the sibling repos was already
+#     returning 401 `deny_no_user`), and a daily run against it would be
+#     either red every day or green having tested nothing.
 #
-# Use a `pid` reserved for CI. A profile allows ONE live connection, so a
-# canary sharing a pid with a person's run gets `profile_locked` (exit 5) and
-# reports a failure that has nothing to do with the site. This was measured:
-# two runs launched back to back against one pid, the second exited 5.
+#     gh workflow run canary.yml -R 2scraper/catawiki-scraper -f route=cdp
 #
-# The secret is passed through the ENVIRONMENT, which env_config.py reads for
-# exactly this variable, rather than through a --cdp-endpoint flag. Two
-# reasons: a credential on a command line is readable by anything that can
-# run `ps`, which is the rule this repo states and should therefore follow in
-# its own CI; and an unset secret arrives as an empty string, which the
-# loader already treats as "not configured", so there is no commented-out
-# line for someone to forget to uncomment.
-#
-# ON DEMAND, NOT ON A SCHEDULE — forced by the credential rather than chosen.
-#
-# A Scraping Browser endpoint on this account does not survive a day: every
-# credential inherited from the sibling repos in this family was already
-# returning 401 `deny_no_user` when this repo was written. A daily cron
-# against a credential with that lifetime produces one of two useless
-# outcomes: a red badge every day (if a dead endpoint fails the job), or a
-# green badge every day that has tested nothing (if it does not). The second
-# is the more dangerous, because green reads as "the parser still works".
-#
-# So the schedule is off. Dispatch it by hand, with a fresh secret, when the
-# answer matters — before a release, or when someone reports the parser
-# missing a column.
-#
-# Put the schedule back the day a long-lived credential exists:
-#     schedule:
-#       - cron: "23 6 * * *"
+#   Use a `pid` reserved for CI there: a profile allows ONE live connection,
+#   so a canary sharing a pid with a person's run gets `profile_locked`
+#   (exit 5). Measured: two runs back to back on one pid, the second exited 5.
+#   The secret travels through the ENVIRONMENT, which env_config.py reads,
+#   never through a --cdp-endpoint flag on a command line.
 on:
+  schedule:
+    - cron: "23 6 * * *"
   workflow_dispatch:
+    inputs:
+      route:
+        description: "local = headful Chromium under xvfb (no secret); cdp = Scraping Browser API via the CATAWIKI_CDP_ENDPOINT secret"
+        type: choice
+        options: [local, cdp]
+        default: local
 
 jobs:
   live-run:
     runs-on: ubuntu-latest
-    # `secrets` is not available in a job-level `if`, so presence is tested
-    # through the job environment and read in each step's `if`.
     env:
-      HAVE_CDP: ${{ secrets.CATAWIKI_CDP_ENDPOINT != '' }}
+      # A scheduled run has no inputs, so it always takes the local route.
+      ROUTE: ${{ inputs.route || 'local' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Explain a skipped run
-        if: env.HAVE_CDP != 'true'
-        run: |
-          echo "::notice::Skipping the live run: no CATAWIKI_CDP_ENDPOINT secret is set."
-          echo "Akamai refuses a headless browser on this site with HTTP 403 and"
-          echo "a 394-byte Access Denied page, from every address measured -"
-          echo "residential exits included. A plain runner has no display, so a"
-          echo "run from here would be red every time whatever the state of the"
-          echo "code. Set a Scraping Browser API endpoint (with a pid reserved"
-          echo "for CI) to turn this canary on:"
-          echo
-          echo "    gh secret set CATAWIKI_CDP_ENDPOINT --repo 2scraper/catawiki-scraper"
-          echo
-          echo "The offline suite (tests.yml) covers everything that does not"
-          echo "need the network, and it runs on every push."
-
       - uses: actions/setup-python@v5
-        if: env.HAVE_CDP == 'true'
         with:
           python-version: "3.12"
 
       - name: Install the Playwright client
-        if: env.HAVE_CDP == 'true'
-        # No `playwright install chromium`: with --cdp-endpoint the browser is
-        # remote, so downloading a local one would add minutes and a gigabyte
-        # to every run for nothing.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-playwright.txt
 
+      - name: Install a local Chromium and a virtual display
+        # Not on the cdp route: the browser is remote there, and downloading
+        # a local one would add minutes for nothing.
+        if: env.ROUTE == 'local'
+        run: |
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y xvfb
+
       - name: Scrape a real, known-good category listing
         id: run
-        if: env.HAVE_CDP == 'true'
         # A CATEGORY url, not a search — and on this site that is forced
         # rather than preferred.
         #
@@ -136,28 +116,47 @@ jobs:
         # three of six captures and succeeding on the next attempt. The
         # engine's own block-retry budget covers that; this leaves headroom.
         #
+        # --headful on the local route is also the engine's default here; it
+        # is spelled out because it is the whole reason this route works.
+        #
         # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
         # this a non-zero scraper exit aborts the script on THAT line and the
         # `echo "exit_code=$?"` below never runs. continue-on-error only stops
         # the step from failing the job; it does not touch the shell's errexit.
         continue-on-error: true
-        env:
-          CATAWIKI_CDP_ENDPOINT: ${{ secrets.CATAWIKI_CDP_ENDPOINT }}
         run: |
           set +e
-          python3 playwright_scraper.py \
-            --url "https://www.catawiki.com/en/c/333-watches" \
-            --pages 3 --retries 4 --out canary_run --dump-html canary_run.html
+          args=(--url "https://www.catawiki.com/en/c/333-watches"
+                --pages 3 --retries 4 --out canary_run --dump-html canary_run.html)
+          if [ "$ROUTE" = "cdp" ]; then
+            echo "[canary] route: Scraping Browser API (CATAWIKI_CDP_ENDPOINT)"
+            if [ -z "$CATAWIKI_CDP_ENDPOINT" ]; then
+              echo "::error::route=cdp was requested but no CATAWIKI_CDP_ENDPOINT secret is set. Dispatch with route=local, or set the secret."
+              echo "exit_code=2" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            python3 playwright_scraper.py "${args[@]}"
+          else
+            echo "[canary] route: local headful Chromium under xvfb, no credential"
+            # The secret is deliberately NOT in this branch's environment:
+            # env_config.py would pick it up and silently turn the local
+            # route into the remote one.
+            unset CATAWIKI_CDP_ENDPOINT
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" \
+              python3 playwright_scraper.py --headful "${args[@]}"
+          fi
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+        env:
+          # Empty unless the secret exists; only the cdp branch reads it.
+          CATAWIKI_CDP_ENDPOINT: ${{ env.ROUTE == 'cdp' && secrets.CATAWIKI_CDP_ENDPOINT || '' }}
 
       - name: Interpret the exit code
         id: verdict
-        if: env.HAVE_CDP == 'true'
         # ACCESS CONDITIONS ARE NOT DEFECTS, and on this site that
         # distinction decides whether the badge means anything.
         #
-        # Failing the job on ANY non-zero exit makes the canary red for two
-        # things that are nobody's bug:
+        # Failing the job on ANY non-zero exit makes the canary red for
+        # things that are nobody's bug. On the cdp route:
         #
         #   * the SECRET EXPIRED. A Scraping Browser credential is not
         #     forever — every one inherited from the sibling repos was
@@ -167,6 +166,12 @@ jobs:
         #     live connection. A canary that collides with a person's run
         #     exits 5 with `profile_locked`, which says nothing about the
         #     site or the code.
+        #
+        # On the local route, 3 means Akamai refused the runner's address or
+        # browser after all -- one live run from a runner is one measurement,
+        # not a guarantee -- and 5 means the page never arrived (a navigation
+        # timeout). Neither is a parser regression, so both warn there too,
+        # with a message naming that route.
         #
         # So: 3 (blocked), 5 (remote API error) and 6 (partial) are reported
         # as WARNINGS and do not fail the job. What stays red is a run that
@@ -184,20 +189,27 @@ jobs:
         run: |
           set -e
           code="${{ steps.run.outputs.exit_code }}"
+          route="${ROUTE:-local}"
           tested=true
           case "$code" in
             0)
               echo "OK — products parsed from a live run." ;;
             3)
               tested=false
-              echo "::warning::Blocked before parsing (exit 3) — an ACCESS condition, not a code defect, so this run is not failed. On this site a block means the site sent NOTHING: there is no challenge to solve and no key would help. Check the debug dump's byte count in the artefacts — 0 bytes means the request never got a response. Try a different --cdp-endpoint pid."
+              echo "::warning::Blocked before parsing (exit 3) — an ACCESS condition, not a code defect, so this run is not failed. On this site a block means the site sent NOTHING: there is no challenge to solve and no key would help. Check the debug dump's byte count in the artefacts — 0 bytes means the request never got a response. On route=cdp try a different pid; on the local route the runner's address or browser was refused, which a re-run from a different runner may clear."
               echo "### Canary did NOT test anything (exit 3, blocked)" >> "$GITHUB_STEP_SUMMARY"
               echo "The site did not serve the request, so the parser was not exercised. This is access, not a regression — but it also means the site-side check did not happen. On this site the first thing to check is whether the run was headless: a proxy will not fix that." >> "$GITHUB_STEP_SUMMARY" ;;
             5)
               tested=false
-              echo "::warning::Remote API error (exit 5) — the Scraping Browser endpoint refused the connection, so nothing was tested and this run is not failed. If the log says 'profile_locked', another run still holds this pid: give CI its own. Otherwise the CATAWIKI_CDP_ENDPOINT secret has most likely expired and needs refreshing."
-              echo "### Canary did NOT test anything (exit 5, endpoint refused)" >> "$GITHUB_STEP_SUMMARY"
-              echo "The most likely cause is an expired \`CATAWIKI_CDP_ENDPOINT\` secret. Refresh it, or remove it to go back to the explicit SKIP path." >> "$GITHUB_STEP_SUMMARY" ;;
+              if [ "$route" = "cdp" ]; then
+                echo "::warning::Remote API error (exit 5) — the Scraping Browser endpoint refused the connection, so nothing was tested and this run is not failed. If the log says 'profile_locked', another run still holds this pid: give CI its own. Otherwise the CATAWIKI_CDP_ENDPOINT secret has most likely expired and needs refreshing."
+                echo "### Canary did NOT test anything (exit 5, endpoint refused)" >> "$GITHUB_STEP_SUMMARY"
+                echo "The most likely cause is an expired \`CATAWIKI_CDP_ENDPOINT\` secret. Refresh it, or dispatch with route=local." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::warning::The page was never obtained (exit 5) on the local xvfb route — a navigation timeout or a browser that did not start, so nothing was tested and this run is not failed. If it repeats daily, read the scrape step's log: that is a runner-side change, not a parser one."
+                echo "### Canary did NOT test anything (exit 5, page never obtained)" >> "$GITHUB_STEP_SUMMARY"
+                echo "Local route: the scrape step's log names the navigation error." >> "$GITHUB_STEP_SUMMARY"
+              fi ;;
             6)
               tested=false
               echo "::warning::Partial run (exit 6) — some pages were gathered and the run then stopped early, usually the remote target closing mid-scroll. canary_run.meta.json names which pages failed. Not failed, because on this site that is an access condition; if it repeats on every run, suspect pagination instead."
@@ -219,7 +231,7 @@ jobs:
         # Only when the run actually got in. On a blocked or refused run
         # there is no output file to check, and a missing file would fail for
         # the wrong reason.
-        if: env.HAVE_CDP == 'true' && steps.verdict.outputs.tested == 'true'
+        if: steps.verdict.outputs.tested == 'true'
         # Exit 0 only means "some rows were written". It says nothing about
         # whether the page actually rendered: a snapshot taken too early
         # still writes rows, just with fields empty. Every floor below is set
@@ -405,7 +417,7 @@ jobs:
         # Always, not just on failure: a run that returns the WRONG numbers
         # with no error is exactly the regression that needs the actual bytes
         # the parser saw, not a pass/fail badge.
-        if: always() && env.HAVE_CDP == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: canary-run-${{ github.run_id }}
