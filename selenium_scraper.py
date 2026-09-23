@@ -699,7 +699,25 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         return outcome
 
     final_url = d["current_url"]() or url
-    products = _parse_for_mode(html, final_url, args, page_num)
+    # Through the POLICY rather than unconditionally. `STATE_POLICY` is the
+    # one place that says which states are worth reading, and until now
+    # nothing consulted its `parse` column: the engines parsed whatever
+    # reached this line, so every state without an earlier `return` was
+    # read regardless of what the table said.
+    #
+    # # On THIS site that was a live bug, not a tidiness point. A no-results
+    # search classifies as `empty` (parse: False) and its "other lots you
+    # might like" rail parses to three real lots — a Cartier wallet at EUR
+    # 11, a LEGO minifigure at EUR 28, a Star Wars figure at EUR 155, each
+    # with a genuine sku, title and url. A search for something Catawiki
+    # does not have returned three plausible rows that were not results,
+    # and nothing downstream could tell them from a hit.
+    #
+    # Measured across the family on 2026-09-23 by counting definitions
+    # against readers: 7 of 24 repos defined `should_parse` and none of
+    # them called it.
+    products = (_parse_for_mode(html, final_url, args, page_num)
+                if page_flow.should_parse(state) else [])
     logger.info("Parsed %d row(s) from page %d.", len(products), page_num)
 
     if args.mode == "lot":
