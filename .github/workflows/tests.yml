@@ -214,7 +214,15 @@ jobs:
         run: |
           set -o pipefail
           .venv/bin/python smoke_test.py | tee smoke.log
-          if grep -q "${{ matrix.engine }}_scraper could not be imported" smoke.log; then
+          # The engine this job installed must IMPORT. This step used to grep
+          # the suite's log for "<engine>_scraper could not be imported", a
+          # phrase this suite never prints, so it could not fail: measured
+          # 2026-09-24 by running each repo's suite with no engine installed,
+          # the phrase appeared in 2 of 31 logs. Importing the module is what
+          # the step meant, it does not depend on the suite's wording, and it
+          # fails here by name because every engine imports its driver at
+          # module level (smoke_test.py asserts that).
+          if ! .venv/bin/python -c "import ${{ matrix.engine }}_scraper"; then
             echo "FAILED: ${{ matrix.engine }}_scraper failed to import even though"
             echo "        ${{ matrix.engine }} is installed in this job."
             exit 1
