@@ -85,7 +85,7 @@ body:
       placeholder: |
         python3 playwright_scraper.py \
           --url "https://www.catawiki.com/en/c/333-watches" \
-          --pages 3 --out grills
+          --pages 3 --out watches
     validations:
       required: true
 
@@ -105,7 +105,7 @@ body:
     attributes:
       label: What you expected instead
       placeholder: >-
-        96 products, as the README says a category page yields.
+        24 lots per page, as the README says a category listing carries.
     validations:
       required: true
 

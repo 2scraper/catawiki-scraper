@@ -233,7 +233,7 @@ not a verification: the first live run of the pyppeteer engine crashed on its
 FIRST fetch on a signature mismatch that four separate offline checks and 400
 green assertions had not caught.
 
-Do not add anything that submits the registration form. This project
+Do not add anything that submits a registration or login form. This project
 deliberately never does, and a captcha token proved valid by creating a real
 account is not a result worth having.
 
