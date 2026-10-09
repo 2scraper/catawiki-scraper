@@ -605,18 +605,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         debug_html = f"{args.out}_page{page_num}_debug.html"
         with open(debug_html, "w", encoding="utf-8") as f:
             f.write(html or "")
-        logger.error(
-            "The site did not serve this request — %d bytes, %s the site's "
-            "own asset host, saved to %s. There is no challenge to solve. "
-            "What clears it, measured 2026-09-10: a HEADFUL browser, and the "
-            "exit address does not matter (four residential exits and one "
-            "returned identical pages) — a datacentre address gets nothing. "
-            "Note this engine cannot use an authenticated remote CDP endpoint "
-            "or an authenticated proxy; see the README's engine limits. This "
-            "is exit 3, distinct from a genuinely empty result (exit 4).",
-            len(html or ""),
-            "which references" if served_by_catawiki(html or "")
-            else "with no reference to", debug_html)
+        logger.error("%s", page_flow.not_served_message(
+            html, headless=bool(getattr(args, "headless", False)),
+            has_pool=has_pool, tries=block_retries + 1,
+            debug_html=debug_html))
         outcome.blocked_by = "no-response" if not html else "not-served"
         outcome.final_url = d["current_url"]()
         return outcome
@@ -650,14 +642,14 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             # page's JSON-LD and not out of the buy box.
             if args.mode == "lot":
                 logger.info("The product name did not paint within %.0fs. "
-                            "That is not fatal: a detail row is read from the "
-                            "page's own Apollo cache and its price meta, both "
-                            "in the first response, so the parse below "
+                            "That is not fatal: a lot row is read from the "
+                            "page's own __NEXT_DATA__ payload, which is in the first "
+                            "response, so the parse below "
                             "decides.", timeout_s)
             else:
                 logger.info("No listing tiles appeared within %.0fs. If this "
-                            "URL is a /p/<slug> discovery hub or one page "
-                            "past the end of a listing, that is the expected "
+                            "URL is one page past the end of a listing or a search "
+                            "with no matches, that is the expected "
                             "answer and the run will report 0 rows (exit 4).",
                             timeout_s)
 
@@ -985,30 +977,17 @@ def parse_args():
         description="Catawiki auction scraper (Selenium edition). Cannot authenticate a "
                     "proxy or a remote CDP endpoint — see the module "
                     "docstring; playwright_scraper.py is the primary engine.")
-    p.add_argument("--url", default=None,
-                   help="A Catawiki URL: /{loc}/c/{id}-{slug}, /{loc}/s?q=..., "
-                        "/p/<cat>/<sub>/<subsub>, or /{shop}/{slug} with "
-                        "--mode product. Required, unless CATAWIKI_URL is "
-                        "set in the environment or in .env.")
+    p.add_argument("--url", default=None, help=page_flow.URL_HELP)
     p.add_argument("--mode", choices=["listing", "lot", "auctions"],
-                   default="listing",
-                   help="listing (default) or product. product reads one "
-                        "/{shop}/{slug} page out of its own Apollo cache and "
-                        "adds the site's real product id, the EXACT sold "
-                        "count, the review count, the condition and the "
-                        "shipping weight — the columns a listing row cannot "
-                        "carry. No --pages in product mode. There is "
-                        "deliberately no shop mode; see playwright_scraper.")
+                   default="listing", help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None, help="Label to tag output rows with.")
-    p.add_argument("--pages", type=int, default=1, help="Listing pages to crawl")
+    p.add_argument("--pages", type=int, default=1, help=page_flow.PAGES_HELP)
     p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Accepted for flag parity and IGNORED here: parallel "
                         "page fetching lives in playwright_scraper.py.")
-    p.add_argument("--retries", type=int, default=3,
-                   help="Attempts per page load before giving up (default 3). "
-                        "A page that comes back EMPTY is not retried: an empty "
-                        "hub category is a correct answer, not a fault.")
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
+                   help=page_flow.RETRIES_HELP)
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first retry, doubling thereafter")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
@@ -1101,19 +1080,9 @@ def parse_args():
                 f"storefront — one language, one currency, no per-country "
                 f"hostname and no locale prefix.")
     kind = listing_kind(args.url)
-    if args.mode == "lot" and kind != "lot":
-        p.error(f"--mode product expects a /{{shop}}/{{slug}} product URL; "
-                f"{args.url!r} is a {kind} page.")
-    if args.mode == "listing" and kind == "lot":
-        p.error(f"{args.url!r} is a single product page. Use --mode product "
-                f"for it, or pass a /search?st=product&q=... or "
-                f"/p/<cat>/<sub>/<subsub> URL.")
-    if args.mode == "listing" and kind == "hub":
-        logger.warning(
-            "%s is a /p/<slug> DISCOVERY HUB, not a listing — no product "
-            "grid, only banners and recommendation carousels — so this run "
-            "will return 0 rows and exit 4. The real listings are one or two "
-            "levels down: /p/<cat>/<sub>[/<subsub>].", args.url)
+    mismatch = page_flow.mode_url_mismatch(args.mode, args.url, kind)
+    if mismatch:
+        p.error(mismatch)
     return args
 
 

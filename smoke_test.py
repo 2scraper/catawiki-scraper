@@ -731,6 +731,78 @@ def test_page_flow():
     ok &= check("and the block-retry budgets are 0",
                 page_flow.BLOCK_RETRIES_WITHOUT_POOL == 0
                 and page_flow.BLOCK_RETRIES_WITH_POOL == 0)
+    # --retries 0 used to skip navigation entirely (range(1, 0 + 1) is empty),
+    # so the engine judged about:blank: a 39-byte empty DOM reported as
+    # "blocked", exit 3, for a site that was never asked. Found by an audit
+    # whose own live run used --retries 0 and read that as a block.
+    import argparse as _ap
+    ok &= check("--retries accepts 1 and 3",
+                page_flow.attempts("1") == 1 and page_flow.attempts("3") == 3)
+    for bad in ("0", "-1", "x"):
+        try:
+            page_flow.attempts(bad)
+            raised = False
+        except _ap.ArgumentTypeError:
+            raised = True
+        ok &= check("--retries %s is refused as a usage error" % bad, raised)
+    for eng in ("playwright", "selenium", "puppeteer"):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                eng + "_scraper.py"), encoding="utf-8").read()
+        ok &= check("%s: --retries goes through page_flow.attempts" % eng,
+                    '"--retries", type=page_flow.attempts' in src)
+        ok &= check("%s: the not-served log is the shared message" % eng,
+                    "page_flow.not_served_message(" in src)
+
+    # An empty DOM is not Akamai's refusal, and the message must not say so.
+    empty = "<html><head></head><body></body></html>"
+    m = page_flow.not_served_message(empty, headless=False, has_pool=False,
+                                     tries=1, debug_html="x.html")
+    ok &= check("a headful empty DOM is called a navigation that did not "
+                "complete, not a refusal, and does not blame headless",
+                "empty document" in m and "--retries" in m
+                and "HEADLESS" not in m and "proxy" not in m.lower())
+    m = page_flow.not_served_message(empty, headless=True, has_pool=False,
+                                     tries=1, debug_html="x.html")
+    ok &= check("a headless empty DOM also names headless", "HEADLESS" in m)
+    m = page_flow.not_served_message(BLOCKED_403, headless=False,
+                                     has_pool=False, tries=1,
+                                     debug_html="x.html")
+    ok &= check("a headful refusal page is not blamed on headless",
+                "headful" in m and "HEADLESS" not in m
+                and "empty document" not in m)
+
+    ok &= check("--mode lot on a category URL is a usage error naming lot",
+                "--mode lot" in (page_flow.mode_url_mismatch(
+                    "lot", "https://www.catawiki.com/en/c/333-watches",
+                    "category") or ""))
+    ok &= check("a lot URL in listing mode points at --mode lot, not product",
+                "Use --mode lot" in (page_flow.mode_url_mismatch(
+                    "listing", "https://www.catawiki.com/en/l/1-x", "lot")
+                    or ""))
+    ok &= check("a matching mode and URL is accepted",
+                page_flow.mode_url_mismatch("listing", "u", "category") is None)
+
+    # The user-facing text of all three engines must describe THIS site. It
+    # was inherited from a different marketplace scraper (a product mode, an
+    # Apollo cache, IDR, /p/<cat> URLs), and a reader following --help sent
+    # the wrong URL kind and the wrong mode.
+    import ast as _ast
+    stale = ("st=product", "--mode product", "Apollo", "/p/<", "IDR ",
+             "discovery hub", "/{shop}")
+    for eng in ("playwright", "selenium", "puppeteer"):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            eng + "_scraper.py")
+        tree = _ast.parse(open(path, encoding="utf-8").read())
+        hits = sorted({t for n in _ast.walk(tree)
+                       if isinstance(n, _ast.Constant) and isinstance(n.value, str)
+                       for t in stale if t in n.value})
+        ok &= check("%s: no stale marketplace wording in its strings %s"
+                    % (eng, hits or ""), not hits)
+    for name in ("URL_HELP", "MODE_HELP", "PAGES_HELP", "RETRIES_HELP"):
+        txt = getattr(page_flow, name)
+        ok &= check("page_flow.%s has no stale wording" % name,
+                    not any(t in txt for t in stale))
+
     advice = page_flow.block_advice(BLOCKED_403, headless=True, has_pool=False)
     ok &= check("the block advice names the real cause (headless), not the proxy",
                 "HEADLESS" in advice and "--headful" in advice)

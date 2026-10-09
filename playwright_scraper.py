@@ -921,24 +921,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         with open(debug_html, "w", encoding="utf-8") as f:
             f.write(html or "")
         served = served_by_catawiki(html or "")
-        logger.error(
-
-            "The site did not serve this request — %d bytes, %s the site's "
-            "own asset host, saved to %s. On this site a refusal is a 394-byte "
-            "\"Access Denied\" with no vendor name and nothing to solve, and "
-            "it is triggered by the browser being headless rather than by the "
-            "address: no interstitial, no "
-            "vendor marker, so there is no challenge to solve and no key "
-            "would help. What clears it, measured 2026-09-10: a residential "
-            "exit. The country does not matter — an Indonesian and a US "
-            "residential exit returned identical pages — but a datacentre "
-            "address gets nothing. Use --cdp-endpoint, or a residential "
-            "--proxy. This is exit 3, distinct from a genuinely empty result "
-            "(exit 4).%s",
-            len(html or ""), "which references" if served else "with no "
-            "reference to", debug_html,
-            (f" Tried {block_retries + 1} exit(s)." if has_pool
-             else f" Re-fetched {block_retries + 1} time(s)."))
+        logger.error("%s", page_flow.not_served_message(
+            html, headless=bool(getattr(args, "headless", False)),
+            has_pool=has_pool, tries=block_retries + 1,
+            debug_html=debug_html))
         outcome.blocked_by = "no-response" if not html else "not-served"
         outcome.final_url = session.page.url
         return outcome
@@ -974,14 +960,13 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             # page's JSON-LD and not out of the buy box.
             if args.mode == "lot":
                 logger.info("The product name did not paint within %.0fs. "
-                            "That is not fatal: a detail row is read from the "
-                            "page's own Apollo cache and its price meta, both "
-                            "of which are in the first response, so the parse "
-                            "below decides.", content_timeout / 1000)
+                            "That is not fatal: a lot row is read from the "
+                            "page's own __NEXT_DATA__ payload, which is in the first "
+                            "response, so the parse below decides.", content_timeout / 1000)
             else:
                 logger.info("No listing tiles appeared within %.0fs. If this "
-                            "URL is a /p/<slug> discovery hub or one page "
-                            "past the end of a listing, that is the expected "
+                            "URL is one page past the end of a listing or a search "
+                            "with no matches, that is the expected "
                             "answer and the run will report 0 rows (exit 4).",
                             content_timeout / 1000)
 
@@ -1253,7 +1238,7 @@ def scrape(args) -> int:
     concurrency = max(1, args.concurrency)
     if concurrency > 1:
         if args.mode == "lot":
-            logger.info("--concurrency is ignored in --mode product: there is "
+            logger.info("--concurrency is ignored in --mode lot: there is "
                         "one page to fetch.")
             concurrency = 1
         elif args.cdp_endpoint:
@@ -1507,46 +1492,15 @@ def scrape(args) -> int:
 def parse_args():
     p = argparse.ArgumentParser(
         description="Catawiki auction scraper (Playwright edition)")
-    p.add_argument("--url", default=None,
-                   help="A Catawiki URL: a category listing "
-                        "(/search?st=product&q=...), a category listing "
-                        "(/p/<cat>/<sub>[/<subsub>]) or one product "
-                        "(/{shop}/{slug}) with --mode product. One "
-                        "storefront, one language, one currency — there is "
-                        "no locale prefix and no per-country host. "
-                        "Required, unless CATAWIKI_URL is set in the environment "
-                        "or in .env.")
+    p.add_argument("--url", default=None, help=page_flow.URL_HELP)
     p.add_argument("--mode", choices=["listing", "lot", "auctions"],
-                   default="listing",
-                   help="listing (default): a search grid "
-                        "(/search?st=product&q=...) or a category listing "
-                        "(/p/<cat>/<sub>/<subsub>) — 60 products per batch. "
-                        "product: one /{shop}/{slug} page, read from the "
-                        "page's own Apollo cache, which adds the site's real "
-                        "product id, the EXACT sold count, the review count, "
-                        "the condition, the shipping weight and the "
-                        "category's own listing URL. --pages applies to "
-                        "listing only; there is one page to read in product "
-                        "mode. There is deliberately no shop mode: a "
-                        "shop front is a different application "
-                        "shell whose markup has not been measured, and a mode "
-                        "that ships untested is worse than one that is "
-                        "absent.")
+                   default="listing", help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None,
                    help="Label to tag output rows with. Defaults to the "
-                        "category leaf from a /c/ URL, the search query from a "
-                        "/search URL, and the breadcrumb in --mode product, so "
-                        "the column is rarely empty just because the flag was "
-                        "omitted. A shop front spans categories and gets none, "
-                        "so pass one if you want that column filled.")
-    p.add_argument("--pages", type=int, default=1,
-                   help="Number of listing pages to crawl. Applies to "
-                        "--mode listing; ignored in --mode product, which "
-                        "has one page. Note that only a CATEGORY URL has "
-                        "per-page addresses: a search is one infinitely "
-                        "scrolling page, so --pages above 1 there is honoured "
-                        "by scrolling further rather than by fetching more "
-                        "URLs.")
+                        "category leaf from a /c/ URL and the search query "
+                        "from a /s URL, so the column is rarely empty just "
+                        "because the flag was omitted.")
+    p.add_argument("--pages", type=int, default=1, help=page_flow.PAGES_HELP)
     p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Fetch pages through N parallel workers (default 1 — "
@@ -1554,23 +1508,18 @@ def parse_args():
                         "own browser and holds its own proxy exit, so N>1 "
                         "without --proxy-file just sends N times the traffic "
                         "from one address. Ignored with --cdp-endpoint.")
-    p.add_argument("--retries", type=int, default=3,
-                   help="Attempts per page load before giving up (default 3). "
-                        "The pause between attempts doubles each time. A page "
-                        "that comes back EMPTY is not retried — see "
-                        "page_flow.STATE_POLICY — because an empty hub "
-                        "category is a correct answer, not a fault.")
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
+                   help=page_flow.RETRIES_HELP)
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="catawiki_products", help="Output file prefix")
     p.add_argument("--locale", default="id-ID",
-                   help="Browser locale (default id-ID, the site's only "
-                        "one). It does NOT decide the language or the "
-                        "currency: this site serves euro on all 18 locales and "
-                        "IDR prices to an Indonesian and a US exit alike, so "
-                        "this only affects what the browser claims about "
+                   help="Browser locale (default id-ID). It does NOT decide the "
+                        "language or the currency: the language is the URL's "
+                        "/{loc}/ segment and prices are euro on every locale, "
+                        "so this only affects what the browser claims about "
                         "itself.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL, e.g. http://ACCOUNT:PASSWORD@HOST:9999 "
@@ -1688,25 +1637,9 @@ def parse_args():
                 f"storefront — one language, one currency, no per-country "
                 f"hostname and no locale prefix.")
     kind = listing_kind(args.url)
-    if args.mode == "lot" and kind != "lot":
-        p.error(f"--mode product expects a /{{shop}}/{{slug}} product URL; "
-                f"{args.url!r} is a {kind} page.")
-    if args.mode == "listing" and kind == "lot":
-        p.error(f"{args.url!r} is a single product page. Use --mode product "
-                f"for it, or pass a /search?st=product&q=... or "
-                f"/p/<cat>/<sub>/<subsub> URL.")
-    if args.mode == "listing" and kind == "hub":
-        # Said as a warning rather than an error: it IS a Catawiki URL and
-        # the run will honestly report zero rows (exit 4). But a reader who
-        # tries the obvious category URL first would otherwise conclude the
-        # tool is broken, so name what happened.
-        logger.warning(
-            "%s is a /p/<slug> DISCOVERY HUB, not a listing. It has no "
-            "product grid on it — only banners and recommendation carousels "
-            "— so this run will return 0 rows and exit 4. The real listings "
-            "are one or two levels down: /p/<cat>/<sub>[/<subsub>], e.g. "
-            "/p/makanan-minuman/minuman/kopi-bubuk. A product page's own "
-            "breadcrumb names its category's listing URL.", args.url)
+    mismatch = page_flow.mode_url_mismatch(args.mode, args.url, kind)
+    if mismatch:
+        p.error(mismatch)
     if args.mode in ("lot", "auctions") and args.pages != 1:
         # Said out loud rather than silently ignored: a user who passed
         # --pages 5 expects five pages of something.

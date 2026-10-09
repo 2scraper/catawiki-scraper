@@ -41,6 +41,7 @@ this was checked instead of ported.
 
 from __future__ import annotations
 
+import argparse
 import logging
 from typing import Callable, Dict, Iterable, List, Optional, Union
 from urllib.parse import urljoin, urlsplit
@@ -53,6 +54,11 @@ from product_parser import (auction_links, detect_block_marker,
                             PAGE_CAP)
 
 logger = logging.getLogger("page_flow")
+
+# Below this a document with no reference to the site's assets is an empty
+# DOM (a bare <html><head></head><body></body></html> is 39 bytes), not the
+# refusal page, which is 300+ bytes.
+EMPTY_DOM_BYTES = 100
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +296,95 @@ def block_advice(html: Optional[str], headless: bool,
     return (f"blocked ({marker}) with a headful browser and a proxy pool. "
             f"Rotation is unlikely to help on this site; --cdp-endpoint is "
             f"the path measured to work.")
+
+
+def not_served_message(html: Optional[str], headless: bool, has_pool: bool,
+                      tries: int, debug_html: str) -> str:
+    """The log line for a page the site did not serve (exit 3).
+
+    One text for all three engines, built from the same facts as
+    `block_advice`. It states what was OBSERVED -- the byte count and whether
+    the document references the site's own assets -- and only then what that
+    usually means here. A document of a few dozen bytes is an EMPTY DOM, not
+    Akamai's refusal (a 394-byte "Access Denied"), and no HTTP status
+    reaches this line, so it must not claim the site refused anything.
+    """
+    n = len(html or "")
+    served = served_by_catawiki(html or "")
+    seen = (f"The site did not serve this request: {n} bytes, "
+            f"{'which references' if served else 'with no reference to'} "
+            f"the site's own asset host, saved to {debug_html}.")
+    if n < EMPTY_DOM_BYTES and not served:
+        what = (f" That is an empty document, not a refusal page (Akamai's "
+                f"is a 394-byte \"Access Denied\"), so the navigation most "
+                f"likely never completed: check the network and that "
+                f"--retries is at least 1.")
+        if headless:
+            what += (" This run was HEADLESS, which this site refuses "
+                     "whatever the address; --headful is the default.")
+    elif headless:
+        what = (" This run was HEADLESS, and Akamai refuses a headless "
+                "browser here regardless of the exit address. Run "
+                "--headful, or use --cdp-endpoint.")
+    else:
+        what = (" This run was headful, so the cause is not the headless "
+                "flag; the exit address may be scored. "
+                + ("Rotation is unlikely to help here; " if has_pool else "")
+                + "--cdp-endpoint is the path measured to work.")
+    return (f"{seen}{what} Tried {tries} time(s). This is exit 3, distinct "
+            f"from a genuinely empty result (exit 4).")
+
+
+def attempts(value: str) -> int:
+    """argparse type for --retries: attempts per page load, so at least 1.
+
+    The loop is `range(1, retries + 1)`. Zero ran it NEVER, `goto` was not
+    called, and the engine judged about:blank -- an empty DOM reported as
+    "blocked" (exit 3) for a site that was never asked.
+    """
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer")
+    if n < 1:
+        raise argparse.ArgumentTypeError(
+            "must be at least 1: it counts attempts per page load, and 0 "
+            "would attempt none and judge a page that was never fetched")
+    return n
+
+
+def mode_url_mismatch(mode: str, url: str, kind: str) -> Optional[str]:
+    """The usage error for a --mode that cannot read this URL, or None."""
+    if mode == "lot" and kind != "lot":
+        return (f"--mode lot expects a /{{loc}}/l/{{id}}-{{slug}} lot URL; "
+                f"{url!r} is a {kind or 'unrecognised'} page.")
+    if mode == "listing" and kind == "lot":
+        return (f"{url!r} is a single lot page. Use --mode lot for it, or "
+                f"pass a category (/{{loc}}/c/{{id}}-{{slug}}), a search "
+                f"(/{{loc}}/s?q=...) or an auction (/{{loc}}/a/{{id}}-{{slug}}) "
+                f"URL.")
+    return None
+
+
+URL_HELP = ("A Catawiki URL: a category /{loc}/c/{id}-{slug}, a search "
+            "/{loc}/s?q=..., an auction /{loc}/a/{id}-{slug}, the auctions "
+            "index /{loc}/a (--mode auctions), or one lot "
+            "/{loc}/l/{id}-{slug} (--mode lot). Required, unless "
+            "CATAWIKI_URL is set in the environment or in .env.")
+MODE_HELP = ("listing (default): a category, a search or a whole auction, "
+             "24 lots per page on the first two. lot: one lot page, adding "
+             "the estimate, the seller and their feedback score, the "
+             "specifications and the bid history. auctions: the auctions "
+             "index as a work list, one row per auction, to feed back in "
+             "as --url.")
+PAGES_HELP = ("Listing pages to crawl (--mode listing on a category or a "
+              "search; ?page=N, capped by the site at 100). Ignored in "
+              "--mode lot and --mode auctions, and for a whole auction, "
+              "which is one page.")
+RETRIES_HELP = ("Attempts per page load before giving up (default 3, "
+                "minimum 1). The pause between attempts doubles each time. "
+                "A page that comes back EMPTY is not retried: an empty "
+                "listing is a correct answer, not a fault.")
 
 
 # ---------------------------------------------------------------------------

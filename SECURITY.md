@@ -100,7 +100,10 @@ Three places leak credentials that people do not expect, because unlike our own
 log lines they are **not** masked:
 
 - **raw HTML dumps** (`--dump-html`, and the automatic dump on a zero-product
-  run) — these can contain session cookies
+  run) — the page's markup as the browser serialised it, not the cookie jar,
+  but a site can write session identifiers or CSRF tokens into inline scripts,
+  so treat a dump as sensitive. A blocked page's dump is a few hundred bytes
+  and carries none
 - **the Scraper API's `x-debug` response header**
 - **your shell history**, if you passed a key on the command line
 
