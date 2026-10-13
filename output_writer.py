@@ -3,24 +3,18 @@ output_writer.py
 -----------------
 Shared row models + JSON/CSV writers used by all three scrapers.
 
-Two modes, one row shape
-------------------------
-    --mode listing   a search grid or a category listing -> Product
-    --mode product   one /{shop}/{slug} detail page -> Product, with the
-                     trailing detail-only fields populated
+Three modes, two row shapes
+---------------------------
+    --mode listing   a category, a search or a whole auction -> Product
+    --mode lot       one /{loc}/l/{id}-{slug} page -> Product, with the
+                     lot-page-only columns populated
+    --mode auctions  the auctions index as a work list -> Auction
 
-The listing and lot modes yield the SAME class, because here a lot page is not a
-different kind of object from a tile — it is the same product described more
-fully. So there is no second dataclass here (a sibling repo needs one for
-reviews; this one does not), and `diff_runs.py` can compare a listing run
-against a product run on the columns both populate.
-
-There is deliberately no `--mode seller`. A seller's own page is its own
-application shell with its own markup, none of which has been captured or
-measured, and a mode that ships untested would be worse than a mode that is
-absent. `product_parser.shop_metadata` reads the seller's facts off a detail
-page for the sidecar, which is what a run covering one product can honestly
-say about its seller.
+A lot page is not a different kind of object from a listing card, it is the
+same lot described more fully, so listing and lot rows are the SAME class and
+`diff_runs.py` can compare a listing run against a lot run on the columns both
+populate. An auction is a different kind of thing, so it gets its own class
+rather than a Product with most columns null.
 
 `Product` keeps the family's first sixteen columns in the family's order,
 with this site's own ones appended after `position`, so a consumer
@@ -37,13 +31,11 @@ from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
 
 
-# The hostname a row came from. Catawiki is ONE storefront — 18 locales as a
-# path prefix on one host — measured by
-# fetching the same URL from an Indonesian and a US exit and getting
-# identical markup, identical `<html lang="id">` and identical IDR prices —
-# so this column is `catawiki.com` on every row of every run. It is kept
-# because the family's schema has it in this position and consumers read the
-# columns by name across repos.
+# The hostname a row came from. Catawiki is ONE storefront: the locale is a
+# path segment on one host and prices are euro on every locale, so this column
+# is `catawiki.com` on every row of every run. It is kept because the family's
+# schema has it in this position and consumers read the columns by name
+# across repos.
 SOURCE_DEFAULT = "catawiki.com"
 
 
@@ -52,80 +44,42 @@ class Product:
     source: str = SOURCE_DEFAULT
     scraped_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     url: str = ""
-    # The product's `/{shop-slug}/{product-slug}` path, and NOT the 19-digit
-    # tail most slugs end in.
-    #
-    # That tail is tempting and wrong. The site's own id for this product is
-    # `pdpBasicInfo.productID` in a detail page's Apollo cache —
-    # 103490518624 where the URL tail is 1731177319241910164 — and 4 of 40
-    # listing URLs carry no tail at all (two carry a short hex suffix
-    # instead), all four ordinary organic products with identical markup. So
-    # a tail-derived sku would have been a different number than the site's,
-    # null on a tenth of every run, and nobody would have noticed either.
-    #
-    # The path is always present, is what the site's own canonical uses, and
-    # is what a listing row and a detail row join on. `product_id` below
-    # carries the real numeric id where a page states it.
+    # The lot id: the number after `/l/` in the lot's URL, which is also the
+    # id the page's own payload carries.
     sku: Optional[str] = None
     title: Optional[str] = None
-    # The SHOP. On a marketplace of small sellers the shop IS the brand, and
-    # A listing publishes no manufacturer field anywhere, so this column
-    # carries the seller's display name instead of being null on every row.
-    # Read from the tile on a search page (95/95), from the badge image's alt
-    # on a category tile, and from `pdpBasicInfo.shopName` on a detail page;
-    # falls back to the slug in the URL, which names the same seller.
+    # A listing publishes no brand field, and splitting the title on its
+    # dashes would be a guess presented as a fact, so this is null on a
+    # listing row. A lot page's own specifications carry a real Brand, which
+    # fills it in --mode lot.
     brand: Optional[str] = None
+    # `bid_kind` below says WHICH quantity this is.
     price: Optional[float] = None
-    # IDR, and on this site that is a fact rather than a guess: one
-    # storefront, one currency, and the two exit countries tested returned
-    # zero price differences across the 68 products both saw. Still null
-    # rather than defaulted when no price was found — a row with no price has
-    # no currency either.
+    # Euro on every locale. Null rather than defaulted when no price was
+    # found: a row with no price has no currency either.
     currency: Optional[str] = None
-    # The was-price, from the tile's strike node. 88 of 95 search tiles carry
-    # one; a CATEGORY tile carries none at all (0 of 60), which is a property
-    # of that page kind and not a parsing failure. Null in --mode product: a
-    # detail page has no strikethrough of its own and the "similar products"
-    # carousel's strikes belong to other products.
+    # Family columns that this site's parser never sets, so they are null on
+    # every row: Catawiki has no was-price, no per-lot rating and no review
+    # count. They stay for now so the family's column prefix is unchanged.
     original_price: Optional[float] = None
-    # Computed from the two prices, never read off the printed badge.
-    # A sibling site only prints its badge above some threshold — two tiles carry
-    # a strike at 7% and 8% off with no badge — so computing recovers 88 rows
-    # where reading recovers 86, and where both exist they agreed on all 86.
     discount_pct: Optional[float] = None
-    # A per-item rating, which this site does not publish at all — worth
-    # stating because a sibling repo's tile stars are the SHOP's, and folding
-    # the two together would make one column mean different things per site.
-    # 95/95 on a search page, 0/60 on a category page (that tile kind prints
-    # none at all), and `pdpBasicInfo.stats.rating` on a detail page.
     rating: Optional[float] = None
-    # Null on every listing row and populated in --mode product, from
-    # `stats.countReview`. A tile prints the sold count, never the review
-    # count.
     review_count: Optional[int] = None
-    # Only a detail page says: `status == "ACTIVE"` with a non-zero
-    # `maxOrder`. A tile does not state availability at all, so this is null
-    # on a listing run rather than assumed true.
+    # Set on a lot page only, as "the lot is not closed" when a price or a
+    # closed state is known. A listing card does not state it, so it is null
+    # on a listing run rather than assumed.
     in_stock: Optional[bool] = None
-    # Sparse ON PURPOSE, and this is the trap on this site.
-    #
-    # A sibling site lazy-loads its tile images, so a tile below the fold carries a
-    # PLACEHOLDER in `src`: 55 of 95 search tiles held an SVG under
-    # `/zeus_v2/` and 30 of 60 category tiles held a `data:` URI. Reading
-    # `src` blindly gives a column that is 100% populated and half wrong, so
-    # a real image is recognised positively by its host and everything else
-    # is null. Scroll further and more rows fill in.
+    # From the listing payload's own image fields (originalImageUrl, else
+    # thumbImageUrl) and the lot page's image list. Null when the site
+    # published no image url for that lot.
     image_url: Optional[str] = None
     category: Optional[str] = None
     # Where `price` came from:
-    #   "dom"          the rendered tile. The ONLY case on a listing page —
-    #                  there is no structured data on one to confirm against,
-    #                  which is measured rather than assumed (0 JSON-LD, 0
-    #                  __NEXT_DATA__, 0 Apollo state on six captures).
-    #   "meta+apollo"  --mode product: the price from the page's own
-    #                  `product:price:amount` meta, everything else from its
-    #                  Apollo cache.
-    #   "meta"         --mode product where the Apollo cache was absent.
+    #   "next_data+dom"  a listing row: the amount read off the hydrated
+    #                    card, everything else from the page's payload.
+    #   "next_data"      the payload alone: a lot page, or a listing row
+    #                    whose card had not hydrated (so it has no price).
+    #   "dom"            the fallback path, read off the card with no payload.
     # diff_runs.py reports a price change that comes with a price_source
     # change as `source_changed`, not `changed`: that says something about
     # our own two snapshots, not about the site.
@@ -134,13 +88,9 @@ class Product:
     # ---- site-specific, appended so the family prefix stays stable ----
     # Which listing page this row came from (1-based) and its position in
     # that page as the site ordered it. Without `page`, `position` is
-    # ambiguous — it restarts at 1 on every page. Both null in --mode
-    # product, where there is no page.
+    # ambiguous — it restarts at 1 on every page.
     page: Optional[int] = None
     position: Optional[int] = None
-    # The seller's URL slug, from the row's own path. Always present, and
-    # kept beside `brand` because a shop's display name can change and its
-    # slug is what the URL commits to.
     # ---- Catawiki-specific, appended after the family prefix (§9) ----
     # WHICH quantity `price` is. Three states share one node on a listing
     # card and are told apart only by a label in the page's language, which
@@ -219,9 +169,6 @@ class Product:
     # implied by the source (§9).
     listing_kind: Optional[str] = None
 
-# Row classes by --mode, so an engine maps its mode to a schema in one place.
-# Both modes are Product here; the mapping exists so adding a mode later is a
-# one-line change rather than a search for every place that assumed Product.
 @dataclass
 class Auction:
     """One row per AUCTION, for --mode auctions.
@@ -253,12 +200,13 @@ class Auction:
     position: Optional[int] = None
 
 
+# Row classes by --mode, so an engine maps its mode to a schema in one place.
 ROW_CLASS_BY_MODE = {"listing": Product, "lot": Product, "auctions": Auction}
 
 # Modes whose rows are one-per-sku, and therefore safe to dedupe on `sku` and
-# to hand to diff_runs.py. Both of this repo's modes qualify: a listing page
-# names each product once, and a product page IS one product.
-UNIQUE_BY_SKU_MODES = ("listing", "product")
+# to hand to diff_runs.py. A listing names each lot once and a lot page IS one
+# lot. `auctions` rows are a different class and are refused by the diff.
+UNIQUE_BY_SKU_MODES = ("listing", "lot")
 
 
 def dedupe_by_key(rows: Sequence[Any], seen: Set[str], key: str = "sku") -> List[Any]:
@@ -266,19 +214,17 @@ def dedupe_by_key(rows: Sequence[Any], seen: Set[str], key: str = "sku") -> List
 
     `seen` is mutated in place, so callers thread the same set across pages —
     a stale or repeating next-page link then re-parses a page without
-    duplicating its rows into the final output. On this site this DOES fire
-    on healthy runs: page 1 and page 2 of one category listing shared
-    exactly 3 products, all three from the "cheaper products" carousel that
-    appears on every page of a listing. So a small non-zero drop count here
-    is expected and a large one is not.
+    duplicating its rows into the final output. A small non-zero drop count
+    is expected on a healthy run, since a listing page can repeat a lot a
+    neighbouring page already carried; a large one is not.
 
     A row with no key is always kept: there is nothing to check a duplicate
     against, and dropping it would be a silent data loss rather than a
     duplicate removal.
 
-    Both of this repo's modes are one row per `sku`, so `key` is never
-    overridden here — the parameter exists because the rest of the family
-    shares this function and one of them needs it.
+    The modes that use this are one row per `sku`, so `key` is not overridden
+    here; the parameter exists because the rest of the family shares this
+    function.
     """
     fresh = []
     for r in rows:
@@ -340,19 +286,15 @@ EXIT_NO_PRODUCTS = 4
 # search genuinely matched nothing" from "something stood between us and the
 # content". See product_parser.detect_bot_challenge.
 #
-# On this site this code specifically does NOT cover the three ways to get a
-# real page with no products on it: a `/p/<slug>` discovery hub, which
-# answers 200 with banners and carousels and no grid; a search whose query
-# matches nothing ("Oops, produk nggak ditemukan"); and one page past the
-# end of a category listing. All three are EXIT_NO_PRODUCTS — the request
-# was served exactly as asked and simply has no products on it. Reporting
-# any of them as blocked would send a user hunting for a proxy problem that
-# does not exist.
+# This code does NOT cover the ways to get a real page with no products on
+# it: a search whose query matches nothing, and one page past the end of a
+# listing. Both are EXIT_NO_PRODUCTS: the request was served exactly as asked
+# and simply has no products on it. Reporting either as blocked would send a
+# user hunting for a proxy problem that does not exist.
 #
-# What EXIT_BLOCKED means here is unusually literal: this site refuses a
-# address it has scored NOTHING at all. No status code, no interstitial, no
-# vendor marker — the HTTP/2 stream is reset and the run sees a connection
-# error rather than a page.
+# What EXIT_BLOCKED means here: Akamai answered with HTTP 403 and a short
+# "Access Denied" page that carries nothing to solve, which this site does to
+# a headless browser whatever its address. See the README.
 EXIT_BLOCKED = 3
 
 # Exit code for a run that gathered SOME rows and then stopped early — a
@@ -441,13 +383,8 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
     here, since the site has one storefront and one currency; it is kept
     because consumers read these columns by name across the family.
 
-    `extra` carries facts about the run that are not about any single row.
-    `--mode shop` uses it for the SELLER's own name, location, rating and
-    review count: a run covers exactly one shop, so those belong to the run
-    rather than repeated down a column, and the shop's review count (16679
-    on the captured seller) is a different number from its listings' own
-    (827 on one of them) — putting them in one column would make the schema
-    lie.
+    `extra` carries facts about the run that are not about any single row,
+    such as a lot page's seller metadata.
 
     `pages_failed` lists the pages that did not yield data, by number.
     `pages_completed` alone was enough only while pages were fetched strictly
@@ -518,15 +455,12 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 # the DATA (a page contributed nothing not already seen, so the listing is
 # over), while the second is a property of a CSS SELECTOR and is therefore
 # the weaker signal — a renamed attribute looks identical to a short
-# catalogue. On this site that ordering is not a preference, it is the only
-# thing that works: the site publishes NO `link[rel=next]` and no numbered
-# anchors anywhere, a CATEGORY listing is addressable by `?page=N`, and a
-# SEARCH is not addressable at all — `?page=2` there returns an empty result
-# set rather than page 2. So "no new products" is the one termination
-# condition available on a search. See page_flow.pagination_is_addressable.
+# catalogue. The site publishes no `link[rel=next]`; both listing kinds are
+# addressable by `?page=N` (see page_flow.pagination_is_addressable), and "no
+# new products" is the termination condition that does not depend on markup.
 #
-# "single_page_mode" is complete by construction: --mode product reads one
-# page because one page is all there is.
+# "single_page_mode" is complete by construction: --mode lot and --mode
+# auctions read one page because one page is all there is.
 COMPLETE_STOP_REASONS = ("completed", "pagination_exhausted", "no_new_products",
                          "single_page_mode")
 
@@ -557,9 +491,8 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     # sidecar — a file that contradicts itself, and a pipeline branching
     # on `status` reading a short run as a whole one.
     #
-    # Found by a third-party audit of a sibling repo and measured across
-    # the family by CALLING each `finish_run` rather than grepping for the
-    # fix: 28 of 32 repos behaved this way. Same shape as the exit-code
+    # Found by a third-party audit and measured by CALLING `finish_run`
+    # rather than grepping for the fix. Same shape as the exit-code
     # unification this file already carries — a rule keyed on a list of
     # names has a hole for every name nobody added to it.
     complete = stop_reason in COMPLETE_STOP_REASONS and not pages_failed

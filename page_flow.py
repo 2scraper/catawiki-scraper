@@ -34,9 +34,7 @@ Three scrolls to `document.body.scrollHeight` added exactly zero cards and
 did not change the page height on any of the three page kinds (24 -> 24 on a
 category listing, 24 -> 24 on a search grid, 40 -> 40 on a lot page). Every
 listing page holds its whole 24 lots and paginates by URL, so a scroll here
-would be latency bought for nothing. The opposite of a sibling repo, where
-the scroll is the only way any product is ever seen -- which is exactly why
-this was checked instead of ported.
+would be latency bought for nothing.
 """
 
 from __future__ import annotations
@@ -158,8 +156,8 @@ def wait_for_count(count: Callable[[str], int], sleep: Callable[[int], None],
 
     Polls a COUNT rather than waiting on an evaluated string. Playwright's
     `wait_for_function` hands the browser a string to evaluate, which a site
-    whose CSP lacks `unsafe-eval` refuses outright -- it took a sibling repo's
-    run down with `EvalError` and exit 1 on the site's most obvious URL.
+    whose CSP lacks `unsafe-eval` refuses outright -- the run
+    dies with `EvalError` and exit 1.
     Catawiki's CSP does allow `unsafe-eval` today (checked on all three page
     kinds: `script-src 'self' 'unsafe-eval' ...`), so this is not a bug being
     worked around here -- it is one not being invited back in when a header
@@ -188,10 +186,9 @@ def classify(html: Optional[str], status: Optional[int] = None,
     """Which of the five states this response is.
 
     `status` is positional and comes SECOND, matching `detect_page_state`.
-    Getting that wrong is not a style question: a sibling repo shipped two of
-    three engines calling this as `classify(html, url=...)`, both crashed on
-    their first fetch, and nothing short of a live run or a signature-binding
-    check saw it (§17).
+    Getting that wrong is not a style question: an engine calling this as
+    `classify(html, url=...)` crashes on its first fetch, and nothing short of
+    a live run or a signature-binding check sees it (§17).
     """
     if html is None:
         # A bare navigation failure. On this site that IS what a refusal
@@ -210,8 +207,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
 #   blocked  does this count towards exit 3?
 STATE_POLICY: Dict[str, Dict[str, bool]] = {
     "content":   {"parse": True,  "retry": False, "solve": False, "blocked": False},
-    # NOT parsed, and this is the one policy row that differs from every
-    # sibling repo. A Catawiki search that matches nothing answers HTTP 200,
+    # NOT parsed, and this row is deliberate. A Catawiki search that matches nothing answers HTTP 200,
     # prints "No results", and BACKFILLS the grid with 24 suggested lots that
     # its payload reports as `total: 24`. Parsing an `empty` page here would
     # write two dozen plausible, well-formed rows for a query that matched
@@ -262,7 +258,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 # client, not the address.
 #
 # So the retry budget for a block is spent on a change that cannot help. It
-# is deliberately 0 here, against `True` in the siblings, and the engines
+# is deliberately 0 here, and the engines
 # read this constant rather than computing their own budget -- a policy
 # constant nothing consults is the same defect as dead code (§17).
 RETRY_ON_BLOCKED = False

@@ -27,16 +27,27 @@ or an empty column.
   likely cause: a document under 100 bytes with no site assets is called an
   empty document and a navigation that did not complete; headless is blamed
   only when the run was headless.
-- **`--help` and usage errors described another marketplace scraper** (a
-  `product` mode, `/search?st=product`, `/p/<cat>` URLs, an Apollo cache, IDR
-  prices, an infinitely scrolling grid). They now describe the real URL kinds
+- **`--help` and usage errors described a different site** (its modes, URL
+  kinds, currency and page structure). They now describe the real URL kinds
   and the `listing|lot|auctions` modes, from one set of strings in `page_flow`.
-  The `--mode lot` usage errors no longer point at `--mode product`, and the
+  The `--mode lot` usage errors no longer point at a mode that does not exist, and the
   discovery-hub warning, which could never fire, is removed. A suite check walks
   every string in the three engines for the old wording.
 
+- **`diff_runs.py` refused every `--mode lot` run.** The list of diffable modes
+  named a mode this repo does not have (`product`) instead of `lot`, so a lot
+  run's sidecar was rejected. `listing` and `lot` are diffable; `auctions` rows
+  are a different class and still are not.
+
 ### Changed
 
+- The listing sidecar's `extra` no longer carries `scroll` and
+  `pages_still_growing`. No engine ever filled them (this site has no scroll
+  loop), so they were always empty; `result_header` is unchanged. The
+  `--mode lot` branch that read never-set seller facts is removed too.
+- Comments, docstrings and `CONTRIBUTING.md` no longer describe another
+  site's markup, ids, measurements or modes; they describe this site's
+  payload and card, and the real URL kinds. No column or flag changed.
 - `SECURITY.md` no longer says a raw HTML dump contains session cookies; it
   holds the page markup, not the cookie jar.
 

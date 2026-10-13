@@ -703,10 +703,8 @@ solve_recaptcha_v3 = solve_recaptcha
 # ===========================================================================
 # What is deliberately NOT here
 # ===========================================================================
-# The sibling repo in this family carries a whole second solver for its
-# site's OWN first-party image captcha ("Enter the characters you see below",
-# a JPEG of distorted text and a GET form). Roughly 190 lines of it, and none
-# of it is ported here, because this site has no such page.
+# A solver for a site's OWN first-party image captcha (a JPEG of distorted
+# text and a form) is not here, because this site has no such page.
 #
 # What this site does instead is refuse a HEADLESS browser. Measured
 # 2026-09-10 from five different addresses, four of them residential: Akamai

@@ -27,7 +27,7 @@ list, checking whether a lot still exists, diffing an assortment — and use a
 browser engine when you want the bids. Every row it writes says so itself:
 `price_source` is `next_data`, never `next_data+dom`.
 
-Unlike the sibling repos, this path needs no `--cdp-url` to reach the site at
+This path needs no `--cdp-url` to reach the site at
 all: the plain Scraper API request was served. Akamai refuses a HEADLESS
 BROWSER here, not a datacentre address, and this client is not a browser.
 
@@ -305,10 +305,8 @@ def parse_args():
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
-                   help="A Catawiki listing URL — a category listing "
-                        "(/p/<cat>/<sub>/<subsub>) is the only kind this path "
-                        "can read at all, since a search grid has no "
-                        "server-rendered container. Required, unless "
+                   help="A Catawiki listing URL, e.g. a category "
+                        "/{loc}/c/{id}-{slug}. Required, unless "
                         "CATAWIKI_URL is set in the environment or in .env.")
     p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
