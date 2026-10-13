@@ -93,12 +93,9 @@ def _within_tolerance(before: dict, after: dict, changes: dict,
                       tolerance_pct: float) -> bool:
     """True if every differing price field moved by less than `tolerance_pct`.
 
-    Inherited from this family rather than earned here, and said plainly
-    because the alternative is a comment inventing a reason. A sibling repo
-    needs it: that site converts prices for a cross-border visitor and the
-    exchange rate ticks between two runs of the same command. NO EQUIVALENT
-    CATAWIKI BEHAVIOUR WAS MEASURED — this site quotes euro to every
-    visitor, on all 18 locales including Japanese and Chinese and from every
+    Part of the family's diff contract, and said plainly because the
+    alternative is a comment inventing a reason. NO CATAWIKI BEHAVIOUR NEEDS
+    IT — this site quotes euro to every visitor, on all 18 locales including Japanese and Chinese and from every
     exit tried, so a run holds no conversion and every cent of a difference
     is a real move.
 
@@ -318,9 +315,9 @@ def _check_comparable(args) -> bool:
     # A CURRENCY MISMATCH, which on this site should be impossible — and is
     # checked anyway.
     #
-    # The sibling repos guard cross-storefront diffs with `source`: eleven
-    # country hostnames, so a run of one against another is refused on the
-    # hostname alone. Catawiki is ONE host with ONE currency — 18 locales as
+    # Cross-storefront diffs are normally guarded with `source`, so a run of one
+    # hostname against another is refused on the hostname alone. Catawiki is
+    # ONE host with ONE currency — 18 locales as
     # a path prefix, euro on every one of them, measured 2026-09-10 — so
     # `source` is "catawiki.com" on both sides and there is no storefront
     # split for it to catch.
@@ -382,9 +379,9 @@ def parse_args():
                         "rate tick rather than a price change: reported "
                         "separately and ignored by --fail-on-change. Default 0 "
                         "(report every cent), which is what a Catawiki "
-                        "run wants: the site quotes IDR to every visitor, so "
+                        "run wants: the site quotes euro to every visitor, so "
                         "there is no conversion drift to absorb. The flag is "
-                        "inherited from this scraper family; set it non-zero "
+                        "part of the family's diff contract; set it non-zero "
                         "only with a reason you can state.")
     p.add_argument("--fail-on-change", action="store_true",
                    help="Exit 1 if anything was added, removed or changed — "

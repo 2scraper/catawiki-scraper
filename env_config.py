@@ -200,7 +200,7 @@ def _dests_given_on_argv(dests, argv=None):
     remote browser the caller had just asked it not to use. There was no
     spelling of "ignore what the file says" at all.
 
-    That matters more here than in the sibling repos: this site's local
+    That matters here because this site's local
     headful path and its Scraping Browser path are both first-class, and
     switching between them is routine rather than exceptional.
 

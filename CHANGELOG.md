@@ -13,6 +13,44 @@ or an empty column.
 
 ### Fixed
 
+- **`--retries 0` skipped navigation and reported a block.** The load loop
+  is `range(1, retries + 1)`, so 0 ran it never, `goto` was not called, and
+  the engine judged `about:blank`: a 39-byte empty DOM, exit 3, for a site that
+  was never asked. Reproduced 2026-10-09 (Playwright, `--retries 0`: exit 3 in
+  ~50 ms in both modes; the same command with `--retries 1` fetched 72 lots,
+  `complete`, exit 0). `--retries` now takes an integer of at least 1 in all
+  three engines and refuses 0 as a usage error (exit 2).
+- **The not-served message contradicted the README.** It said a headless
+  browser was the cause, then recommended a residential exit, and said it for a
+  headful run too. One shared `page_flow.not_served_message` now states what
+  was observed (bytes, whether the site's own assets appear) and only then the
+  likely cause: a document under 100 bytes with no site assets is called an
+  empty document and a navigation that did not complete; headless is blamed
+  only when the run was headless.
+- **`--help` and usage errors described a different site** (its modes, URL
+  kinds, currency and page structure). They now describe the real URL kinds
+  and the `listing|lot|auctions` modes, from one set of strings in `page_flow`.
+  The `--mode lot` usage errors no longer point at a mode that does not exist, and the
+  discovery-hub warning, which could never fire, is removed. A suite check walks
+  every string in the three engines for the old wording.
+
+- **`diff_runs.py` refused every `--mode lot` run.** The list of diffable modes
+  named a mode this repo does not have (`product`) instead of `lot`, so a lot
+  run's sidecar was rejected. `listing` and `lot` are diffable; `auctions` rows
+  are a different class and still are not.
+
+### Changed
+
+- The listing sidecar's `extra` no longer carries `scroll` and
+  `pages_still_growing`. No engine ever filled them (this site has no scroll
+  loop), so they were always empty; `result_header` is unchanged. The
+  `--mode lot` branch that read never-set seller facts is removed too.
+- Comments, docstrings and `CONTRIBUTING.md` no longer describe another
+  site's markup, ids, measurements or modes; they describe this site's
+  payload and card, and the real URL kinds. No column or flag changed.
+- `SECURITY.md` no longer says a raw HTML dump contains session cookies; it
+  holds the page markup, not the cookie jar.
+
 - **The Scraper API path (`scraper_api_client.py`) failed whenever a wait flag
   was given, and never saw the target's status.** Measured 2026-09-23 against
   the live `/tasks/sync` endpoint: `waitFor` sent as a JSON-encoded string

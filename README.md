@@ -37,8 +37,7 @@ Anything not measured is not claimed.
 Read it by column, not by row: the exit address changes nothing and the
 headless flag changes everything. So:
 
-* **`--headful` is the default here**, unlike every sibling repo in this
-  family. A `--headless` default would be a scraper whose default cannot
+* **`--headful` is the default here.** A `--headless` default would be a scraper whose default cannot
   fetch the site.
 * `--headless` is still accepted, because `--cdp-endpoint` ignores it and
   because a change on the site would make it work again. It will report

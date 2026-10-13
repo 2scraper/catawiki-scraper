@@ -726,11 +726,102 @@ def test_page_flow():
     # headful one was served from the same addresses. The budget is 0 on
     # purpose, and the engines read these constants rather than computing
     # their own.
-    ok &= check("RETRY_ON_BLOCKED is False, against True in the siblings",
+    ok &= check("RETRY_ON_BLOCKED is False",
                 page_flow.RETRY_ON_BLOCKED is False)
     ok &= check("and the block-retry budgets are 0",
                 page_flow.BLOCK_RETRIES_WITHOUT_POOL == 0
                 and page_flow.BLOCK_RETRIES_WITH_POOL == 0)
+    # --retries 0 used to skip navigation entirely (range(1, 0 + 1) is empty),
+    # so the engine judged about:blank: a 39-byte empty DOM reported as
+    # "blocked", exit 3, for a site that was never asked. Found by an audit
+    # whose own live run used --retries 0 and read that as a block.
+    import argparse as _ap
+    ok &= check("--retries accepts 1 and 3",
+                page_flow.attempts("1") == 1 and page_flow.attempts("3") == 3)
+    for bad in ("0", "-1", "x"):
+        try:
+            page_flow.attempts(bad)
+            raised = False
+        except _ap.ArgumentTypeError:
+            raised = True
+        ok &= check("--retries %s is refused as a usage error" % bad, raised)
+    for eng in ("playwright", "selenium", "puppeteer"):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                eng + "_scraper.py"), encoding="utf-8").read()
+        ok &= check("%s: --retries goes through page_flow.attempts" % eng,
+                    '"--retries", type=page_flow.attempts' in src)
+        ok &= check("%s: the not-served log is the shared message" % eng,
+                    "page_flow.not_served_message(" in src)
+
+    # An empty DOM is not Akamai's refusal, and the message must not say so.
+    empty = "<html><head></head><body></body></html>"
+    m = page_flow.not_served_message(empty, headless=False, has_pool=False,
+                                     tries=1, debug_html="x.html")
+    ok &= check("a headful empty DOM is called a navigation that did not "
+                "complete, not a refusal, and does not blame headless",
+                "empty document" in m and "--retries" in m
+                and "HEADLESS" not in m and "proxy" not in m.lower())
+    m = page_flow.not_served_message(empty, headless=True, has_pool=False,
+                                     tries=1, debug_html="x.html")
+    ok &= check("a headless empty DOM also names headless", "HEADLESS" in m)
+    m = page_flow.not_served_message(BLOCKED_403, headless=False,
+                                     has_pool=False, tries=1,
+                                     debug_html="x.html")
+    ok &= check("a headful refusal page is not blamed on headless",
+                "headful" in m and "HEADLESS" not in m
+                and "empty document" not in m)
+
+    ok &= check("--mode lot on a category URL is a usage error naming lot",
+                "--mode lot" in (page_flow.mode_url_mismatch(
+                    "lot", "https://www.catawiki.com/en/c/333-watches",
+                    "category") or ""))
+    ok &= check("a lot URL in listing mode points at --mode lot, not product",
+                "Use --mode lot" in (page_flow.mode_url_mismatch(
+                    "listing", "https://www.catawiki.com/en/l/1-x", "lot")
+                    or ""))
+    ok &= check("a matching mode and URL is accepted",
+                page_flow.mode_url_mismatch("listing", "u", "category") is None)
+
+    # The user-facing text of all three engines must describe THIS site. It
+    # was inherited from a different marketplace scraper (a product mode, an
+    # URL kinds, modes and currency), and a reader following --help sent
+    # the wrong URL kind and the wrong mode.
+    import ast as _ast
+    stale = ("st=product", "--mode product", "Apollo", "/p/<", "IDR ",
+             "discovery hub", "/{shop}")
+    for eng in ("playwright", "selenium", "puppeteer"):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            eng + "_scraper.py")
+        tree = _ast.parse(open(path, encoding="utf-8").read())
+        hits = sorted({t for n in _ast.walk(tree)
+                       if isinstance(n, _ast.Constant) and isinstance(n.value, str)
+                       for t in stale if t in n.value})
+        ok &= check("%s: no stale marketplace wording in its strings %s"
+                    % (eng, hits or ""), not hits)
+    for name in ("URL_HELP", "MODE_HELP", "PAGES_HELP", "RETRIES_HELP"):
+        txt = getattr(page_flow, name)
+        ok &= check("page_flow.%s has no stale wording" % name,
+                    not any(t in txt for t in stale))
+
+    # diff_runs refused every --mode lot run: the allowed-mode list named a
+    # mode ("product") this repo does not have, so a lot run's sidecar was
+    # rejected as "a mode that cannot be diffed".
+    import output_writer as _ow
+    ok &= check("lot and listing runs are diffable; auctions rows are not",
+                "lot" in _ow.UNIQUE_BY_SKU_MODES
+                and "listing" in _ow.UNIQUE_BY_SKU_MODES
+                and "auctions" not in _ow.UNIQUE_BY_SKU_MODES
+                and "product" not in _ow.UNIQUE_BY_SKU_MODES)
+    ok &= check("every mode an engine accepts has a row class",
+                set(_ow.ROW_CLASS_BY_MODE) == {"listing", "lot", "auctions"})
+    # PageOutcome carried two fields no engine ever set (a scroll trace and
+    # seller facts), and the sidecar logic around them could never fire.
+    for eng in ("playwright", "selenium", "puppeteer"):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                eng + "_scraper.py"), encoding="utf-8").read()
+        ok &= check("%s: no never-assigned scroll/shop outcome fields" % eng,
+                    "shop_facts" not in src and "o.scroll" not in src)
+
     advice = page_flow.block_advice(BLOCKED_403, headless=True, has_pool=False)
     ok &= check("the block advice names the real cause (headless), not the proxy",
                 "HEADLESS" in advice and "--headful" in advice)
@@ -860,8 +951,10 @@ def test_output_contract():
     # relative timer.
     ok &= check("the listing-only columns are declared too",
                 {"time_left_text", "bid_status_text"} <= set(names))
-    ok &= check("both modes are one row per sku",
-                set(UNIQUE_BY_SKU_MODES) == {"listing", "product"})
+    # This once pinned {"listing", "product"}: a mode this repo does not have,
+    # so the test defended the defect that made diff_runs refuse every lot run.
+    ok &= check("listing and lot are the modes that are one row per sku",
+                set(UNIQUE_BY_SKU_MODES) == {"listing", "lot"})
 
     ok &= check("the exit codes are the family's",
                 (EXIT_BLOCKED, EXIT_NO_PRODUCTS, EXIT_PARTIAL) == (3, 4, 6))
@@ -1007,15 +1100,14 @@ def test_finish_run():
 def test_diff():
     group("diff_runs")
     ok = True
-    # `price_source` on this site is "dom" for a listing row and
-    # "meta+apollo" for a detail row — there is no structured price on a
-    # listing page to confirm against — so the source-change case uses those
-    # two values rather than the sibling repos' jsonld pair.
+    # `price_source` on this site is "next_data+dom" for a listing row and
+    # "next_data" for a lot page, so the source-change case uses those two
+    # values.
     old = [{"sku": "1", "price": 10.0, "price_source": "dom"},
            {"sku": "2", "price": 20.0, "price_source": "dom"},
            {"sku": "3", "price": 30.0, "price_source": "dom"}]
     new = [{"sku": "1", "price": 11.0, "price_source": "dom"},
-           {"sku": "3", "price": 30.5, "price_source": "meta+apollo"},
+           {"sku": "3", "price": 30.5, "price_source": "next_data"},
            {"sku": "4", "price": 40.0, "price_source": "dom"}]
     d = diff_products(old, new)
     ok &= check("a real price move is reported as changed",
@@ -1068,8 +1160,8 @@ def test_diff():
           "price_source": "next_data+dom"}])
     ok &= check("a new bid on an open lot is still a change",
                 len(outbid["changed"]) == 1)
-    # The sibling repo's from-price columns are NOT tracked, because they do
-    # not exist here: a card prints one amount, not a range.
+    # From-price columns are NOT tracked, because they do not exist here: a
+    # card prints one amount, not a range.
     ok &= check("no from-price columns are tracked (this site has none)",
                 not {"price_is_from", "price_max"} & set(tracked))
     ok &= check("...and Product does not declare them either",
@@ -1451,7 +1543,7 @@ def test_fingerprint_client_reads_env():
     import fingerprint_client as fpc
 
     # THE DEFECT THIS PINS, found the first time --fingerprint was run live
-    # here and confirmed present in five sibling repos: `--key` defaulted to
+    # here: `--key` defaulted to
     # `os.environ.get("TWOCAPTCHA_KEY")` alone. So a key put in `.env` —
     # which is exactly what §3, the README and .env.example instruct — worked
     # for every engine and failed HERE with "No API key". A documented
@@ -1519,8 +1611,7 @@ def test_fingerprint_application():
     # Dutch fingerprint. An English-speaking visitor in the Netherlands is
     # possible, but it is not what this fingerprint describes, and a locale
     # that contradicts the rest of the identity is the mismatch again. This
-    # was one of the six defects a sibling repo inherited from copied core
-    # and never ran (§16).
+    # was a defect in the copied fingerprint core that nothing had run (§16).
     ok &= check("the locale is the fingerprint's own, not en-<country>",
                 kw.get("locale") == "nl-NL")
     ok &= check("the timezone is carried, so the browser cannot contradict it",
@@ -1894,8 +1985,7 @@ def test_captcha():
     # ...while the DETECTORS stay broad, which is the family's standing
     # policy: which challenge a visitor meets depends on the exit country and
     # on what the address has been doing.
-    # The marker set is deliberately SHORT on this site, and shorter than
-    # the sibling repos'. None of these has ever been observed here —
+    # The marker set is deliberately SHORT on this site, None of these has ever been observed here —
     # a refused request is not a page at all — so every entry is a guess
     # about a bot manager that might be switched on between deploys, and a
     # long list of guesses is not better than a short one.
@@ -2004,8 +2094,7 @@ def test_env_config():
     # which carries no credential and is a working default.
     ok &= check("the example's default URL is usable as-is",
                 _placeholder_reads_unset(
-                    "https://www.catawiki.com/en/c/333-watches"
-                    "kopi-bubuk") is False)
+                    "https://www.catawiki.com/en/c/333-watches") is False)
 
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, ".env")
@@ -2246,9 +2335,7 @@ def test_engines(skips):
         # three scrolls to the document's own bottom added zero cards and left
         # the page height unchanged on all three page kinds, so an engine that
         # grew a loop back would be buying latency for nothing -- and would
-        # disagree with its twins about what a settled page is. A sibling repo
-        # cannot see one product without the scroll, which is exactly why this
-        # was measured here instead of ported.
+        # disagree with its twins about what a settled page is.
         ok &= check("%s has no scroll loop of its own" % name,
                     "scroll_until_settled" not in src
                     and "scroll_to_bottom" not in src)

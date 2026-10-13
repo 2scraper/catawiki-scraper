@@ -25,7 +25,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
   2026-09-10: HTTP 403 and a 394-byte Akamai "Access Denied" from four
   residential exits and one datacentre address, against HTTP 200 and the full
   catalogue from those very same addresses with a real window. So `--headful`
-  is the DEFAULT here, against headless in every sibling repo, and
+  is the DEFAULT here, and
   `page_flow.RETRY_ON_BLOCKED` is False: rotating an exit spends the budget
   on a change that cannot help. `--cdp-endpoint` is the other measured-
   working path.
@@ -45,8 +45,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
 
 * **There is no scroll, and that is measured.** Three scrolls to the
   document's own bottom added zero cards and left the page height unchanged
-  on all three page kinds. A sibling repo cannot see one product without its
-  scroll loop, which is exactly why this was checked here rather than ported.
+  on all three page kinds.
 
 * **Pagination is arithmetic, and the site caps it at 100 pages.** Page 1's
   payload states `total` and `lotsPerPage`, so every page's address is
@@ -149,29 +148,16 @@ class PageOutcome:
     load_failed: bool = False
     # The page_flow state this page came back as ("content", "blocked",
     # "challenge", "empty", "unknown"). Carried so the caller can tell an
-    # EMPTY page — a /p/<slug> hub, a no-match query, or one page past the
+    # EMPTY page — a search that matches nothing, or one page past the
     # end of a listing — from a page that failed. Both produce zero rows and
     # they mean opposite things.
     state: Optional[str] = None
-    # What the listing itself says its catalogue size is. Populated here,
-    # unlike in a sibling repo: the SSR payload states `total` and
+    # What the listing itself says its catalogue size is. Populated: the SSR payload states `total` and
     # `lotsPerPage` on page 1 (11,681 and 24 on the category measured), which
     # is what makes the page count arithmetic rather than a link to follow.
     total_available: Optional[int] = None
-    # The raw result-count header, verbatim, for the sidecar. Worth recording
-    # and worth nothing as a count — after one scroll it claimed 61-180 while
-    # the DOM held 95 tiles.
+    # The query a search page ran, read from its payload, for the sidecar.
     header: Optional[str] = None
-    # What the lazy-load scroll did: rounds spent, cards reached, and whether
-    # it SETTLED. That last flag is the important one — a page whose grid was
-    # still growing when the round budget ran out is partial, and a run that
-    # reported it as complete would read as a shrinking catalogue.
-    scroll: Optional[dict] = None
-    # In --mode product, the seller's own id/name/slug read off the page's
-    # Apollo cache. Stored as the small dict rather than by keeping the
-    # page's HTML around: a detail page is 285 KB and a scrolled listing
-    # nearly 1 MB.
-    shop_facts: Optional[dict] = None
 
     @property
     def ok(self) -> bool:
@@ -207,7 +193,7 @@ PRICE_FLOOR = {"search": 50, "category": 50, "auction": 40, "lots": 40}
 # A page holding less than this share of the fullest page in the same run is
 # reported as thin. This site's page size is steady — 24 lots per category
 # and search page on every capture and every live run — so the bar can sit
-# closer than it does on the sibling repos, but not
+# fairly close, but not
 # tight: the last page of a listing is legitimately short.
 THIN_PAGE_SHARE = 0.6
 
@@ -236,9 +222,7 @@ def _driver(page):
 # No scroll primitives and no `page_height` here, and that is measured
 # rather than omitted: three scrolls to the document's own bottom added zero
 # cards and left the page height unchanged on all three page kinds. Every
-# listing page holds its whole 24 lots and paginates by URL. A sibling repo
-# cannot see a single product without the scroll, which is exactly why this
-# was checked here instead of ported (see page_flow's docstring).
+# listing page holds its whole 24 lots and paginates by URL. (See page_flow's docstring.)
 
 
 def _ready_selector(args) -> str:
@@ -303,13 +287,9 @@ def _plan_page_urls(page, args, page_one_url: str) -> Optional[List[str]]:
     On Catawiki both listing kinds are addressable and the site's own links
     agree with the convention — but the site CAPS it at 100 pages, and a
     request past the cap returns page 100's lots under HTTP 200 rather than
-    failing. A category listing is addressable: `?page=2` on
-    /p/makanan-minuman/minuman/kopi-bubuk returned 61 products against page
-    1's 66, overlapping by 3 (the "cheaper products" carousel that appears
-    on both). A SEARCH is not: `?page=2` on a search URL does not advance
-    it, it EMPTIES the result set — "Oops, produk nggak ditemukan", no grid,
-    no prices. A planner that built `?page=N` regardless would fetch that,
-    find no new sku, and report a COMPLETE run holding page 1.
+    failing. A page past the end can repeat lots an earlier page carried, so
+    the run still ends on "no new sku" rather than trusting the address
+    alone.
     """
     if args.pages < 2:
         return None
@@ -319,8 +299,7 @@ def _plan_page_urls(page, args, page_one_url: str) -> Optional[List[str]]:
     dropped = len([h for h in hrefs if h]) - len(candidates)
     if dropped > 0:
         logger.info("Ignored %d advertised page-2 link(s) that paginate "
-                    "something other than this listing (a shop front's "
-                    "review pages are the known case).", dropped)
+                    "something other than this listing (e.g. a carousel or filter link).", dropped)
 
     constructed = page_url(page_one_url, 2)
     if candidates:
@@ -375,14 +354,13 @@ def _same_url(a: str, b: str) -> bool:
 
     Delegates to page_flow rather than reimplementing the comparison, so all
     three engines cannot drift on it. An engine that carried its own copy of
-    this in a sibling repo went stale and silently fell back to sequential
-    fetching — the exact divergence page_flow.py exists to prevent,
-    reproduced inside one engine.
+    this inside one engine can go stale and silently fall back to sequential
+    fetching — the exact divergence page_flow.py exists to prevent.
 
-    On this site the comparison has to strip a long tracking tail: a listing
-    anchor arrives with `?extParam=…keyword=kopi&search_id=…&src=search` and
-    a detail page's own canonical arrives with a UTM triple, so two views of
-    one page never match unless both sides are cleaned.
+    On this site the comparison has to strip a long tracking tail: a link the
+    site generates can carry tracking parameters that a canonical address
+    does not, so two views of one page never match unless both sides are
+    cleaned.
     """
     return page_flow.comparable(a) == page_flow.comparable(b)
 
@@ -863,18 +841,18 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
-            # a CORRECT one — a hub category has no grid, and one page past
+            # a CORRECT one — an empty listing has no grid, and one page past
             # the end of a listing has no products — so retrying it would
             # spend the user's budget re-confirming the same right answer,
             # and rotating the exit would blame an address for the URL it was
             # given.
             break
 
-        # Blocked or challenged. A different exit is the one thing that
-        # plausibly changes the outcome: the ADDRESS is what was scored, not
-        # the URL, so retrying it unchanged would only confirm it. Measured
-        # 2026-09-09 — the same URL that answers 403 from a datacentre exit
-        # answers 200 from a residential one.
+        # Blocked or challenged. The retry budget is 0 here
+        # (page_flow.BLOCK_RETRIES_*): this site refuses a headless browser
+        # whatever the exit, so a second attempt from another address would
+        # spend the budget on a change that cannot help. The branch stays so
+        # the budget, not the code path, is what a future measurement edits.
         if block_attempt < block_retries:
             if has_pool:
                 logger.warning("Page %d came back as %s from %s — retrying "
@@ -921,24 +899,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         with open(debug_html, "w", encoding="utf-8") as f:
             f.write(html or "")
         served = served_by_catawiki(html or "")
-        logger.error(
-
-            "The site did not serve this request — %d bytes, %s the site's "
-            "own asset host, saved to %s. On this site a refusal is a 394-byte "
-            "\"Access Denied\" with no vendor name and nothing to solve, and "
-            "it is triggered by the browser being headless rather than by the "
-            "address: no interstitial, no "
-            "vendor marker, so there is no challenge to solve and no key "
-            "would help. What clears it, measured 2026-09-10: a residential "
-            "exit. The country does not matter — an Indonesian and a US "
-            "residential exit returned identical pages — but a datacentre "
-            "address gets nothing. Use --cdp-endpoint, or a residential "
-            "--proxy. This is exit 3, distinct from a genuinely empty result "
-            "(exit 4).%s",
-            len(html or ""), "which references" if served else "with no "
-            "reference to", debug_html,
-            (f" Tried {block_retries + 1} exit(s)." if has_pool
-             else f" Re-fetched {block_retries + 1} time(s)."))
+        logger.error("%s", page_flow.not_served_message(
+            html, headless=bool(getattr(args, "headless", False)),
+            has_pool=has_pool, tries=block_retries + 1,
+            debug_html=debug_html))
         outcome.blocked_by = "no-response" if not html else "not-served"
         outcome.final_url = session.page.url
         return outcome
@@ -967,21 +931,20 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if found <= threshold:
             # Not an error on its own, and what it MEANS depends on the
             # mode — which is why the message does too. A listing page with
-            # no grid is a correct answer (a taxonomy hub, or one page past
+            # no grid is a correct answer (a search that matches nothing, or one page past
             # the end); a detail page whose buy box never painted is a
             # different thing entirely, and on this site it is usually just
             # slow rather than absent, because the row is parsed out of the
-            # page's JSON-LD and not out of the buy box.
+            # page's __NEXT_DATA__ payload and not out of the buy box.
             if args.mode == "lot":
                 logger.info("The product name did not paint within %.0fs. "
-                            "That is not fatal: a detail row is read from the "
-                            "page's own Apollo cache and its price meta, both "
-                            "of which are in the first response, so the parse "
-                            "below decides.", content_timeout / 1000)
+                            "That is not fatal: a lot row is read from the "
+                            "page's own __NEXT_DATA__ payload, which is in the first "
+                            "response, so the parse below decides.", content_timeout / 1000)
             else:
                 logger.info("No listing tiles appeared within %.0fs. If this "
-                            "URL is a /p/<slug> discovery hub or one page "
-                            "past the end of a listing, that is the expected "
+                            "URL is one page past the end of a listing or a search "
+                            "with no matches, that is the expected "
                             "answer and the run will report 0 rows (exit 4).",
                             content_timeout / 1000)
 
@@ -1006,10 +969,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # is the "detected is not blocking" rule the captcha default follows,
     # applied to the blocking decision instead of the spending one. But
     # `state != "content"` is still too wide: an EMPTY page is a correct
-    # answer, and a live run of a /p/<slug> hub reported exit 3 on a 191 KB
-    # page the site had plainly served, because the hub's own performance
-    # script names `akamaihd.net` and "akamai" was in the marker list. Both
-    # halves were wrong; the marker is gone (see
+    # answer, and calling it blocked sends the reader hunting for a proxy
+    # problem that does not exist. A marker that fires on a served page is the
+    # same mistake; the marker set is narrowed (see
     # product_parser.BOT_CHALLENGE_MARKERS) and this now only refines the
     # REASON for a page the policy had already given up on.
     vendor = (detect_bot_challenge(html, url=session.page.url)
@@ -1059,13 +1021,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         outcome.auction_facts = auction_metadata(html, session.page.url)
 
     # This site DOES publish a result total, in its own payload, so the
-    # arithmetic completeness check is available here. What it does not have
-    # is a printed header worth reading — the old note about
-    # untuk "kopi"" — and the total is empty on every capture; the range it
-    # does print is not a count of loaded rows either (it claimed 61-180
-    # while the DOM held 95). So the header is recorded verbatim and
-    # `total_available` stays None rather than carrying a number nobody can
-    # act on.
+    # arithmetic completeness check is available here. The page also
+    # states the query it ran, which is recorded for the sidecar; and
+    # `total_available` stays None when the payload states no total rather
+    # than carrying a number nobody can act on.
     if args.mode == "listing" and page_num == 1:
         outcome.total_available = total_results(html)
         outcome.header = search_header(html)
@@ -1098,10 +1057,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # and its absence is measured rather than an omission: the two sources
         # on this site are not two views of one number. The payload carries
         # everything except the money and the card carries only the money, so
-        # `price_source`
-        # is "dom" on every listing row and a confirmation threshold would
-        # describe nothing. Porting the sibling repo's would be dead code
-        # that looks load-bearing.
+        # a share of rows "confirmed" by a second source would describe
+        # nothing and be dead code that looks load-bearing.
         #
         # What IS worth reporting is how much of the grid had painted its
         # images, because that is the one column this site makes sparse on
@@ -1235,11 +1192,6 @@ def scrape(args) -> int:
     # result). "single_page_mode" is complete by construction — a detail page
     # has no page 2. Anything else is an early stop, and the run is only a
     # partial view.
-    # Only --mode product is single-page. A SHOP FRONT paginates exactly like
-    # a category listing — ?page=N, the same tiles — and treating it as
-    # single-page made `--mode shop --pages 2` fetch one page and report
-    # "complete", which is the silent-success failure this family exists to
-    # avoid. Found on the first live shop run.
     stop_reason = ("single_page_mode" if args.mode in ("lot", "auctions")
                    else "completed")
 
@@ -1253,7 +1205,7 @@ def scrape(args) -> int:
     concurrency = max(1, args.concurrency)
     if concurrency > 1:
         if args.mode == "lot":
-            logger.info("--concurrency is ignored in --mode product: there is "
+            logger.info("--concurrency is ignored in --mode lot: there is "
                         "one page to fetch.")
             concurrency = 1
         elif args.cdp_endpoint:
@@ -1405,18 +1357,15 @@ def scrape(args) -> int:
     # per-page check cannot see a gap BETWEEN two pages, which is exactly
     # where a short page hides.
     #
-    # NOT "pages x rows-per-page". This site's category page size is steady
-    # at 60, but a search page's row count depends on how far the scroll got
-    # before it settled, and the LAST page of any listing is legitimately
-    # short — so multiplying the fullest page by the page count would warn
-    # on healthy runs, and a threshold that fires on every healthy run
-    # teaches the reader to ignore it.
+    # NOT "pages x rows-per-page": the LAST page of a listing is legitimately
+    # short, so multiplying the fullest page by the page count would warn on
+    # healthy runs, and a threshold that fires on every healthy run teaches
+    # the reader to ignore it.
     #
     # What is worth warning about is a page that came back materially THIN
-    # against its siblings — that is what a truncated response or a
-    # half-painted grid looks like. A page holding less than 60% of the
-    # fullest page is well outside the +-3% spread that the varying page size
-    # accounts for.
+    # against the other pages of this run — that is what a truncated response
+    # or a half-painted grid looks like. A listing page holds 24 lots, so a
+    # page under 60% of the fullest page is well outside the normal spread.
     total_available = next((o.total_available for o in outcomes
                             if o.total_available is not None), None)
     if args.mode == "listing" and all_rows:
@@ -1464,36 +1413,12 @@ def scrape(args) -> int:
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
-    # One-per-run context, in the sidecar rather than repeated down a column.
-    #
-    # In --mode product that is the seller's own id and name, off the page's
-    # Apollo cache. In --mode listing it is the scroll trace and the page's
-    # own result header: both say how much of the listing this run actually
-    # saw, which is the question a consumer of an infinitely-scrolling site
-    # most needs answered and which no column can carry.
+    # One-per-run context, in the sidecar rather than repeated down a column:
+    # for a search listing, the query the site says it ran.
     extra = None
-    if args.mode == "lot":
-        first = next((o for o in outcomes if o.ok and o.shop_facts), None)
-        if first is not None and first.shop_facts:
-            extra = dict(first.shop_facts)
-            logger.info("Shop: %s (id %s, /%s).",
-                        extra.get("shop_name") or "?",
-                        extra.get("shop_id") or "?",
-                        extra.get("shop_slug") or "?")
-    else:
-        scrolls = {o.page_num: o.scroll for o in outcomes if o.scroll}
-        headers = {o.page_num: o.header for o in outcomes if o.header}
-        unsettled = sorted(n for n, s in scrolls.items()
-                           if s and not s.get("settled"))
-        if scrolls or headers:
-            extra = {"scroll": scrolls, "result_header": headers,
-                     "pages_still_growing": unsettled}
-        if unsettled:
-            logger.warning(
-                "Page(s) %s were still loading more products when the scroll "
-                "budget ran out, so their row counts are floors rather than "
-                "the listing. Raise the budget or narrow the URL.",
-                ", ".join(str(n) for n in unsettled))
+    headers = {o.page_num: o.header for o in outcomes if o.header}
+    if headers:
+        extra = {"result_header": headers}
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
@@ -1507,46 +1432,15 @@ def scrape(args) -> int:
 def parse_args():
     p = argparse.ArgumentParser(
         description="Catawiki auction scraper (Playwright edition)")
-    p.add_argument("--url", default=None,
-                   help="A Catawiki URL: a category listing "
-                        "(/search?st=product&q=...), a category listing "
-                        "(/p/<cat>/<sub>[/<subsub>]) or one product "
-                        "(/{shop}/{slug}) with --mode product. One "
-                        "storefront, one language, one currency — there is "
-                        "no locale prefix and no per-country host. "
-                        "Required, unless CATAWIKI_URL is set in the environment "
-                        "or in .env.")
+    p.add_argument("--url", default=None, help=page_flow.URL_HELP)
     p.add_argument("--mode", choices=["listing", "lot", "auctions"],
-                   default="listing",
-                   help="listing (default): a search grid "
-                        "(/search?st=product&q=...) or a category listing "
-                        "(/p/<cat>/<sub>/<subsub>) — 60 products per batch. "
-                        "product: one /{shop}/{slug} page, read from the "
-                        "page's own Apollo cache, which adds the site's real "
-                        "product id, the EXACT sold count, the review count, "
-                        "the condition, the shipping weight and the "
-                        "category's own listing URL. --pages applies to "
-                        "listing only; there is one page to read in product "
-                        "mode. There is deliberately no shop mode: a "
-                        "shop front is a different application "
-                        "shell whose markup has not been measured, and a mode "
-                        "that ships untested is worse than one that is "
-                        "absent.")
+                   default="listing", help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None,
                    help="Label to tag output rows with. Defaults to the "
-                        "category leaf from a /c/ URL, the search query from a "
-                        "/search URL, and the breadcrumb in --mode product, so "
-                        "the column is rarely empty just because the flag was "
-                        "omitted. A shop front spans categories and gets none, "
-                        "so pass one if you want that column filled.")
-    p.add_argument("--pages", type=int, default=1,
-                   help="Number of listing pages to crawl. Applies to "
-                        "--mode listing; ignored in --mode product, which "
-                        "has one page. Note that only a CATEGORY URL has "
-                        "per-page addresses: a search is one infinitely "
-                        "scrolling page, so --pages above 1 there is honoured "
-                        "by scrolling further rather than by fetching more "
-                        "URLs.")
+                        "category leaf from a /c/ URL and the search query "
+                        "from a /s URL, so the column is rarely empty just "
+                        "because the flag was omitted.")
+    p.add_argument("--pages", type=int, default=1, help=page_flow.PAGES_HELP)
     p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Fetch pages through N parallel workers (default 1 — "
@@ -1554,23 +1448,18 @@ def parse_args():
                         "own browser and holds its own proxy exit, so N>1 "
                         "without --proxy-file just sends N times the traffic "
                         "from one address. Ignored with --cdp-endpoint.")
-    p.add_argument("--retries", type=int, default=3,
-                   help="Attempts per page load before giving up (default 3). "
-                        "The pause between attempts doubles each time. A page "
-                        "that comes back EMPTY is not retried — see "
-                        "page_flow.STATE_POLICY — because an empty hub "
-                        "category is a correct answer, not a fault.")
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
+                   help=page_flow.RETRIES_HELP)
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="catawiki_products", help="Output file prefix")
     p.add_argument("--locale", default="id-ID",
-                   help="Browser locale (default id-ID, the site's only "
-                        "one). It does NOT decide the language or the "
-                        "currency: this site serves euro on all 18 locales and "
-                        "IDR prices to an Indonesian and a US exit alike, so "
-                        "this only affects what the browser claims about "
+                   help="Browser locale (default id-ID). It does NOT decide the "
+                        "language or the currency: the language is the URL's "
+                        "/{loc}/ segment and prices are euro on every locale, "
+                        "so this only affects what the browser claims about "
                         "itself.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL, e.g. http://ACCOUNT:PASSWORD@HOST:9999 "
@@ -1652,8 +1541,7 @@ def parse_args():
                    help="Save the exact HTML the parser is given, on success as "
                         "well as failure. Useful when the row count is right but "
                         "a column comes back empty — see TROUBLESHOOTING.md.")
-    # HEADFUL by default, a departure from every sibling repo and a measured
-    # one: Akamai refuses a headless browser here whatever the exit -- HTTP
+    # HEADFUL by default, and that is measured: Akamai refuses a headless browser here whatever the exit -- HTTP
     # 403 and a 394-byte "Access Denied" from four residential exits and one
     # datacentre address, against 200 and the full catalogue from those very
     # same addresses with a real window. A --headless default would be a
@@ -1688,25 +1576,9 @@ def parse_args():
                 f"storefront — one language, one currency, no per-country "
                 f"hostname and no locale prefix.")
     kind = listing_kind(args.url)
-    if args.mode == "lot" and kind != "lot":
-        p.error(f"--mode product expects a /{{shop}}/{{slug}} product URL; "
-                f"{args.url!r} is a {kind} page.")
-    if args.mode == "listing" and kind == "lot":
-        p.error(f"{args.url!r} is a single product page. Use --mode product "
-                f"for it, or pass a /search?st=product&q=... or "
-                f"/p/<cat>/<sub>/<subsub> URL.")
-    if args.mode == "listing" and kind == "hub":
-        # Said as a warning rather than an error: it IS a Catawiki URL and
-        # the run will honestly report zero rows (exit 4). But a reader who
-        # tries the obvious category URL first would otherwise conclude the
-        # tool is broken, so name what happened.
-        logger.warning(
-            "%s is a /p/<slug> DISCOVERY HUB, not a listing. It has no "
-            "product grid on it — only banners and recommendation carousels "
-            "— so this run will return 0 rows and exit 4. The real listings "
-            "are one or two levels down: /p/<cat>/<sub>[/<subsub>], e.g. "
-            "/p/makanan-minuman/minuman/kopi-bubuk. A product page's own "
-            "breadcrumb names its category's listing URL.", args.url)
+    mismatch = page_flow.mode_url_mismatch(args.mode, args.url, kind)
+    if mismatch:
+        p.error(mismatch)
     if args.mode in ("lot", "auctions") and args.pages != 1:
         # Said out loud rather than silently ignored: a user who passed
         # --pages 5 expects five pages of something.

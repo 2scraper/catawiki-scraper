@@ -21,10 +21,9 @@ name: canary
 #   Scraping Browser API, country-nl              200, 637 KB, 24 lots
 #
 # Read it by column: the exit address changes nothing and the headless flag
-# changes everything. So a proxy secret would NOT be enough here -- which is
-# the opposite of the sibling repos, where the address is exactly what gets
-# scored -- and there are only two ways for a runner to get in: the Scraping
-# Browser API, or a real window under xvfb.
+# changes everything. So a proxy secret would NOT be enough here, and there
+# are only two ways for a runner to get in: the Scraping Browser API, or a
+# real window under xvfb.
 #
 # THE XVFB ROUTE IS THE CANARY. It was left unverified when this file was
 # first written, and the canary was made dispatch-only around a credential
@@ -45,8 +44,8 @@ name: canary
 #   * The Scraping Browser route is kept, but only on request: dispatch with
 #     `route: cdp` and a CATAWIKI_CDP_ENDPOINT secret set. It is NOT the
 #     scheduled route, because an endpoint on this account does not survive a
-#     day (every credential inherited from the sibling repos was already
-#     returning 401 `deny_no_user`), and a daily run against it would be
+#     day (every credential that was available was already returning 401
+#     `deny_no_user`), and a daily run against it would be
 #     either red every day or green having tested nothing.
 #
 #     gh workflow run canary.yml -R 2scraper/catawiki-scraper -f route=cdp
@@ -98,12 +97,9 @@ jobs:
         # A CATEGORY url, not a search — and on this site that is forced
         # rather than preferred.
         #
-        # A search listing has NO per-page addresses. It is one infinitely
-        # scrolling page, and `?page=2` on a search URL does not advance it,
-        # it EMPTIES the result set ("Oops, produk nggak ditemukan"). So a
-        # search canary could never exercise pagination, which is the thing
-        # this workflow most needs to watch. A category listing paginates
-        # with ?page=N, verified against a real page 2.
+        # Both listing kinds paginate with ?page=N, but a category listing is the
+        # stable one to watch: its lot count does not depend on a query, and
+        # its page 2 was verified against the real site.
         #
         # --pages 3, not 1: with one page pagination is never exercised, so a
         # broken ?page= convention would stay invisible here — precisely the
@@ -159,8 +155,8 @@ jobs:
         # things that are nobody's bug. On the cdp route:
         #
         #   * the SECRET EXPIRED. A Scraping Browser credential is not
-        #     forever — every one inherited from the sibling repos was
-        #     already dead when this repo was written. When it stops
+        #     forever — every one available when this repo was written
+        #     was already dead. When it stops
         #     authenticating the run exits 5.
         #   * ACCESS IS INTERMITTENT PER PROFILE, and a profile allows one
         #     live connection. A canary that collides with a person's run

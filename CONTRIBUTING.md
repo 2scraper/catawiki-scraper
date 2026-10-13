@@ -40,40 +40,26 @@ not the check caught it.
 
 ## Reporting a site change
 
-Catawiki changing its markup is the normal way this stops working, and it
-has its own issue template. The detail that saves the most time is WHICH
-anchor broke, because on this site there is no structured data on a listing
-page to fall back on — measured zero `application/ld+json`, zero
-`__NEXT_DATA__` and zero Apollo state across six captures — so the DOM is
-not the primary path by preference, it is the only one.
+Catawiki changing something is the normal way this stops working, and it has
+its own issue template. The detail that saves the most time is WHICH source
+broke, because the parser reads two different ones for two halves of a row:
 
-1. **The grid container.** `[data-testid="divSRPContentProducts"]` on a
-   search page, `[data-ssr="productsCategoryL2/L3SSR"]` on a category
-   listing. If one of these moves the run reports 0 rows and exit 4, which
-   is loud.
-2. **The tile marker.** `[data-testid="imgLeg-c"]` on a search page (one per
-   tile), `[data-testid="divProductWrapper"]` inside
-   `a[data-testid="lnkProductContainer"]` on a category listing.
-3. **The reading ORDER inside the tile** — badge, title, price, was-price,
-   rating, sold, shop, location. The field reads rest on it, deliberately,
-   because the classes around each field are build hashes:
-   `<span class="+tnoqZhn89+NHUA43BpiJg==">` is the title today. If Catawiki
-   reorders a tile, `title` and the prices are what break.
-4. **`span.flip`**, the shop name and the shop's city in that order, exactly
-   two per search tile.
+1. **The rows** come from the site's own SSR payload,
+   `<script id="__NEXT_DATA__">`, which is in the first response and needs no
+   JavaScript: titles, ids, urls, images, auction ids and the reserve flag. If
+   that moves, the run reports 0 rows and exit 4, which is loud. A lot page
+   (`--mode lot`) is read from the same payload and never from its DOM.
+2. **The money** comes from the rendered card (`.c-lot-card__price` and its
+   siblings), because the payload does not carry it: bids arrive at
+   hydration. If that moves, rows come out with no prices.
 
-The one place structured data does exist is a DETAIL page's
-`window.__cache` Apollo blob, which is where `--mode product` reads the real
-product id, the exact sold count and the review count.
-
-A third thing can break without any path failing: the **join** between the
-tiles and the structured data. When it breaks, the row count and the prices
-stay healthy while `in_stock` and part of `brand` quietly empty out — so
-every run logs its structured-price confirmation share per page and warns
-below a floor set PER PAGE KIND (search 8%, category 70%, shop 80%; the
-achievable share differs by a factor of eight between them). If you are
-reporting a change, that percentage and the page kind are the numbers to
-include.
+`price_source` on a row says which happened: `next_data+dom` is healthy and
+`next_data` means nothing hydrated. A third thing can break without any path
+failing: a status label the page's own translation store no longer maps, which
+leaves `bid_kind` null on rows that have a price. Every run logs its price
+coverage per page and warns below a floor set per page kind (`PRICE_FLOOR` in
+the engines); if you are reporting a change, that percentage and the page kind
+are the numbers to include.
 
 `--dump-html PATH` writes the exact bytes the parser was given, on success as
 well as failure, and a run that finds nothing writes a dump and a screenshot
@@ -191,10 +177,8 @@ silently regress:
   stripping, so the guard would be code that looks load-bearing and never
   runs. Broaden the set and add the guard together.
 - **A sku already written by an earlier page of the same run is dropped, not
-  duplicated.** Unlike its sibling repos this DOES fire on healthy runs
-  here: page 1 and page 2 of one category listing shared exactly 3 products,
-  all three from the "cheaper products" carousel that appears on every page.
-  So a small non-zero drop count is expected and a large one is not. See
+  duplicated.** A live auction listing reorders as lots close, so a small
+  non-zero drop count is possible and a large one is not. See
   `dedupe_by_key` in `output_writer.py`.
 
 There is also a naming check: certain phrases are banned repo-wide and the suite

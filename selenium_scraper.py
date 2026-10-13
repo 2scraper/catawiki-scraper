@@ -120,14 +120,8 @@ class PageOutcome:
     # Populated here: the SSR payload states `total` and `lotsPerPage` on
     # page 1, which is what makes the page count arithmetic.
     total_available: Optional[int] = None
-    # The raw result-count header, verbatim, for the sidecar.
+    # The query a search page ran, read from its payload, for the sidecar.
     header: Optional[str] = None
-    # What the lazy-load scroll did, and crucially whether it SETTLED. A page
-    # whose grid was still growing when the budget ran out is partial.
-    scroll: Optional[dict] = None
-    # In --mode product, the seller's own id/name/slug from the page's Apollo
-    # cache.
-    shop_facts: Optional[dict] = None
 
     @property
     def ok(self) -> bool:
@@ -378,9 +372,9 @@ def _next_page_candidates(session, page_num: int) -> List[str]:
     """The site's own next-page link, resolved by the browser, or None.
 
     Returns EVERY candidate, filtered by page_flow to the ones that really do
-    paginate this listing: a shop front advertises its REVIEWS pagination
-    alongside its items, and following that one returns rows from the wrong
-    listing while reporting success.
+    paginate this listing: a page can advertise other paginated lists
+    alongside its lots, and following one of those returns rows from the
+    wrong listing while reporting success.
 
     Reads the DOM's `.href` property, which is already absolute — the
     opposite of Playwright's get_attribute("href"), which returns the raw
@@ -573,14 +567,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
-            # a CORRECT one — a hub category has no grid — so retrying it
+            # a CORRECT one — an empty listing has no grid — so retrying it
             # would re-confirm the same right answer, and rotating the exit
             # would blame an address for the URL it was given.
             break
 
-        # Blocked or challenged. The ADDRESS is what was scored, not the URL,
-        # so a different exit is the only thing that plausibly changes the
-        # outcome.
+        # Blocked or challenged. The retry budget is 0 here
+        # (page_flow.BLOCK_RETRIES_*): this site refuses a headless browser
+        # whatever the exit, so a second attempt from another address would
+        # spend the budget on a change that cannot help. The branch stays so
+        # the budget, not the code path, is what a future measurement edits.
         if block_attempt < block_retries:
             logger.warning("Page %d came back as %s from %s — retrying from "
                            "another exit (%d/%d).", page_num, state,
@@ -605,18 +601,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         debug_html = f"{args.out}_page{page_num}_debug.html"
         with open(debug_html, "w", encoding="utf-8") as f:
             f.write(html or "")
-        logger.error(
-            "The site did not serve this request — %d bytes, %s the site's "
-            "own asset host, saved to %s. There is no challenge to solve. "
-            "What clears it, measured 2026-09-10: a HEADFUL browser, and the "
-            "exit address does not matter (four residential exits and one "
-            "returned identical pages) — a datacentre address gets nothing. "
-            "Note this engine cannot use an authenticated remote CDP endpoint "
-            "or an authenticated proxy; see the README's engine limits. This "
-            "is exit 3, distinct from a genuinely empty result (exit 4).",
-            len(html or ""),
-            "which references" if served_by_catawiki(html or "")
-            else "with no reference to", debug_html)
+        logger.error("%s", page_flow.not_served_message(
+            html, headless=bool(getattr(args, "headless", False)),
+            has_pool=has_pool, tries=block_retries + 1,
+            debug_html=debug_html))
         outcome.blocked_by = "no-response" if not html else "not-served"
         outcome.final_url = d["current_url"]()
         return outcome
@@ -643,21 +631,21 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if found <= threshold:
             # Not an error on its own, and what it MEANS depends on the
             # mode — which is why the message does too. A listing page with
-            # no grid is a correct answer (a taxonomy hub, or one page past
+            # no grid is a correct answer (a search that matches nothing, or one page past
             # the end); a detail page whose buy box never painted is a
             # different thing entirely, and on this site it is usually just
             # slow rather than absent, because the row is parsed out of the
-            # page's JSON-LD and not out of the buy box.
+            # page's __NEXT_DATA__ payload and not out of the buy box.
             if args.mode == "lot":
                 logger.info("The product name did not paint within %.0fs. "
-                            "That is not fatal: a detail row is read from the "
-                            "page's own Apollo cache and its price meta, both "
-                            "in the first response, so the parse below "
+                            "That is not fatal: a lot row is read from the "
+                            "page's own __NEXT_DATA__ payload, which is in the first "
+                            "response, so the parse below "
                             "decides.", timeout_s)
             else:
                 logger.info("No listing tiles appeared within %.0fs. If this "
-                            "URL is a /p/<slug> discovery hub or one page "
-                            "past the end of a listing, that is the expected "
+                            "URL is one page past the end of a listing or a search "
+                            "with no matches, that is the expected "
                             "answer and the run will report 0 rows (exit 4).",
                             timeout_s)
 
@@ -676,9 +664,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # --cdp-endpoint the Scraping Browser's own auto-solve extension injects
     # such markers into every page it loads.
     # Only for a state page_flow already counts as BLOCKED. An EMPTY page is
-    # a correct answer, and a live run of a /p/<slug> hub reported exit 3 on
-    # a page the site had plainly served because the hub's own performance
-    # script names `akamaihd.net`. Mirrors playwright_scraper exactly.
+    # a correct answer, and calling it blocked sends the reader hunting for a
+    # proxy problem that does not exist. Mirrors playwright_scraper exactly.
     vendor = (detect_bot_challenge(html, url=d["current_url"]())
               if page_flow.counts_as_blocked(state) else None)
     if vendor:
@@ -780,11 +767,6 @@ def scrape(args) -> int:
     blocked = False
     # Both modes are one row per product, so `sku` is the key for both.
     dedupe_key = "sku"
-    # Only --mode product is single-page. A SHOP FRONT paginates exactly like
-    # a category listing — ?page=N, the same tiles — and treating it as
-    # single-page made `--mode shop --pages 2` fetch one page and report
-    # "complete", which is the silent-success failure this family exists to
-    # avoid. Found on the first live shop run.
     stop_reason = "single_page_mode" if args.mode in ("lot", "auctions") else "completed"
 
     pool = proxy_pool_from_args(args)
@@ -885,18 +867,15 @@ def scrape(args) -> int:
     # per-page check cannot see a gap BETWEEN two pages, which is exactly
     # where a short page hides.
     #
-    # NOT "pages x rows-per-page", which is what the sibling repo does and
-    # what fires on healthy runs here. This site's page size is steady:
-    # a three-page run returned 62, 60 and 62 rows, and multiplying the
-    # largest page by the page count then declared the run short by 8. A
-    # threshold that warns on every healthy run teaches the reader to ignore
-    # it.
+    # NOT "pages x rows-per-page": the LAST page of a listing is legitimately
+    # short, so multiplying the fullest page by the page count would warn on
+    # healthy runs, and a threshold that fires on every healthy run teaches
+    # the reader to ignore it.
     #
     # What is worth warning about is a page that came back materially THIN
-    # against its siblings — that is what a truncated response or a
-    # half-painted grid looks like. A page holding less than 60% of the
-    # fullest page is well outside the +-3% spread that the varying page size
-    # accounts for.
+    # against the other pages of this run — that is what a truncated response
+    # or a half-painted grid looks like. A listing page holds 24 lots, so a
+    # page under 60% of the fullest page is well outside the normal spread.
     total_available = next((o.total_available for o in outcomes
                             if o.total_available is not None), None)
     if args.mode == "listing" and all_rows:
@@ -943,33 +922,12 @@ def scrape(args) -> int:
     final_url = (max(ok_pages, key=lambda o: o.page_num).final_url
                  if ok_pages else args.url)
 
-    # One-per-run context, in the sidecar rather than repeated down a column.
-    # Mirrors the other two engines exactly: the seller's own facts in
-    # --mode product, and the scroll trace plus the page's own result header
-    # in --mode listing, because on an infinitely-scrolling site those are
-    # what say how much of the listing the run actually saw.
+    # One-per-run context, in the sidecar rather than repeated down a column:
+    # for a search listing, the query the site says it ran.
     extra = None
-    if args.mode == "lot":
-        first = next((o for o in outcomes if o.ok and o.shop_facts), None)
-        if first is not None and first.shop_facts:
-            extra = dict(first.shop_facts)
-            logger.info("Shop: %s (id %s, /%s).",
-                        extra.get("shop_name") or "?",
-                        extra.get("shop_id") or "?",
-                        extra.get("shop_slug") or "?")
-    else:
-        scrolls = {o.page_num: o.scroll for o in outcomes if o.scroll}
-        headers = {o.page_num: o.header for o in outcomes if o.header}
-        unsettled = sorted(n for n, s in scrolls.items()
-                           if s and not s.get("settled"))
-        if scrolls or headers:
-            extra = {"scroll": scrolls, "result_header": headers,
-                     "pages_still_growing": unsettled}
-        if unsettled:
-            logger.warning(
-                "Page(s) %s were still loading more products when the scroll "
-                "budget ran out, so their row counts are floors rather than "
-                "the listing.", ", ".join(str(n) for n in unsettled))
+    headers = {o.page_num: o.header for o in outcomes if o.header}
+    if headers:
+        extra = {"result_header": headers}
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
@@ -985,30 +943,17 @@ def parse_args():
         description="Catawiki auction scraper (Selenium edition). Cannot authenticate a "
                     "proxy or a remote CDP endpoint — see the module "
                     "docstring; playwright_scraper.py is the primary engine.")
-    p.add_argument("--url", default=None,
-                   help="A Catawiki URL: /{loc}/c/{id}-{slug}, /{loc}/s?q=..., "
-                        "/p/<cat>/<sub>/<subsub>, or /{shop}/{slug} with "
-                        "--mode product. Required, unless CATAWIKI_URL is "
-                        "set in the environment or in .env.")
+    p.add_argument("--url", default=None, help=page_flow.URL_HELP)
     p.add_argument("--mode", choices=["listing", "lot", "auctions"],
-                   default="listing",
-                   help="listing (default) or product. product reads one "
-                        "/{shop}/{slug} page out of its own Apollo cache and "
-                        "adds the site's real product id, the EXACT sold "
-                        "count, the review count, the condition and the "
-                        "shipping weight — the columns a listing row cannot "
-                        "carry. No --pages in product mode. There is "
-                        "deliberately no shop mode; see playwright_scraper.")
+                   default="listing", help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None, help="Label to tag output rows with.")
-    p.add_argument("--pages", type=int, default=1, help="Listing pages to crawl")
+    p.add_argument("--pages", type=int, default=1, help=page_flow.PAGES_HELP)
     p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Accepted for flag parity and IGNORED here: parallel "
                         "page fetching lives in playwright_scraper.py.")
-    p.add_argument("--retries", type=int, default=3,
-                   help="Attempts per page load before giving up (default 3). "
-                        "A page that comes back EMPTY is not retried: an empty "
-                        "hub category is a correct answer, not a fault.")
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
+                   help=page_flow.RETRIES_HELP)
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first retry, doubling thereafter")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
@@ -1066,8 +1011,7 @@ def parse_args():
     p.add_argument("--dump-html", default=None, metavar="PATH",
                    help="Save the exact HTML the parser is given, on success "
                         "as well as failure.")
-    # HEADFUL by default, a departure from every sibling repo and a measured
-    # one: Akamai refuses a headless browser here whatever the exit -- HTTP
+    # HEADFUL by default, and that is measured: Akamai refuses a headless browser here whatever the exit -- HTTP
     # 403 and a 394-byte "Access Denied" from four residential exits and one
     # datacentre address, against 200 and the full catalogue from those same
     # addresses with a real window.
@@ -1101,19 +1045,9 @@ def parse_args():
                 f"storefront — one language, one currency, no per-country "
                 f"hostname and no locale prefix.")
     kind = listing_kind(args.url)
-    if args.mode == "lot" and kind != "lot":
-        p.error(f"--mode product expects a /{{shop}}/{{slug}} product URL; "
-                f"{args.url!r} is a {kind} page.")
-    if args.mode == "listing" and kind == "lot":
-        p.error(f"{args.url!r} is a single product page. Use --mode product "
-                f"for it, or pass a /search?st=product&q=... or "
-                f"/p/<cat>/<sub>/<subsub> URL.")
-    if args.mode == "listing" and kind == "hub":
-        logger.warning(
-            "%s is a /p/<slug> DISCOVERY HUB, not a listing — no product "
-            "grid, only banners and recommendation carousels — so this run "
-            "will return 0 rows and exit 4. The real listings are one or two "
-            "levels down: /p/<cat>/<sub>[/<subsub>].", args.url)
+    mismatch = page_flow.mode_url_mismatch(args.mode, args.url, kind)
+    if mismatch:
+        p.error(mismatch)
     return args
 
 

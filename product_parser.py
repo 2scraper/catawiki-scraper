@@ -563,11 +563,9 @@ BLOCK_MARKERS = (
 )
 
 # Catawiki rendered none of these to an anonymous visitor across 19 captures
-# and 6 locales, and -- unlike a sibling repo in this family -- it ships no
-# captcha mount point and no site key in its page config either
-# (`<captcha-widgets>` and `CAPTCHA_SITE_KEY`: 0 occurrences on every
-# capture). Those are another site's findings and were checked before being
-# believed here. This set is therefore forward-looking: the shapes a
+# and 6 locales, and it ships no captcha mount point and no site key in its
+# page config either (`<captcha-widgets>` and `CAPTCHA_SITE_KEY`: 0
+# occurrences on every capture). This set is therefore forward-looking: the shapes a
 # challenge WOULD take, kept so that an appearance is recognised instead of
 # being reported as an empty page.
 BOT_CHALLENGE_MARKERS = (

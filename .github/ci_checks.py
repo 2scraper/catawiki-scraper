@@ -81,8 +81,7 @@ CREDENTIAL_ALLOWED = (
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 # Contexts in which a 32-hex string is plainly not a key.
 #
-# Deliberately WITHOUT this site's asset hosts, unlike a sibling repo that
-# needed them: Catawiki serves its images under dashed UUIDs
+# Deliberately WITHOUT this site's asset hosts: Catawiki serves its images under dashed UUIDs
 # (`95be01d1-5c40-4126-94fa-...`), which never match a bare 32-hex run, so
 # the committed fixtures carry none and an allowlist entry for them would be
 # dead configuration that reads like enforcement. Verified by running this
