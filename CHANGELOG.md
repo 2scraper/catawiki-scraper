@@ -11,6 +11,12 @@ or an empty column.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-13
+
+> **Behaviour change:** `--retries 0` is now refused as a usage error (exit 2).
+> It used to run no navigation at all and report a block (exit 3). Use
+> `--retries 1` for a single attempt.
+
 ### Fixed
 
 - **`--retries 0` skipped navigation and reported a block.** The load loop
@@ -165,5 +171,6 @@ offline suite.
   told not to use — there was no way to switch a `.env` setting off from the
   command line at all.
 
-[Unreleased]: https://github.com/2scraper/catawiki-scraper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/2scraper/catawiki-scraper/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/2scraper/catawiki-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/catawiki-scraper/releases/tag/v0.1.0
