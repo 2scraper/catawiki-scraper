@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "catawiki-scraper"
-version = "0.1.1"
+version = "0.2.0"
 description = "Catawiki auction scraper: category listings, search results, whole auctions and lot pages."
 readme = "README.md"
 license = "MIT"
