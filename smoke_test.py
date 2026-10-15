@@ -119,7 +119,7 @@ ENGINE_FILES = ("playwright_scraper.py", "puppeteer_scraper.py",
                 "selenium_scraper.py")
 
 # A fingerprint as the 2Captcha API really returns one, with this site's
-# region. Kept as a fixture because three of the six defects §16 lists were
+# region. Kept as a fixture because three earlier defects in that client were
 # one wrong key each in exactly this structure -- `userAgent.value` where the
 # API says `userAgent.userAgent`, a locale built as `en-{country}`, a
 # timezone never applied at all.
@@ -928,14 +928,14 @@ def test_output_contract():
                  "seller_id", "seller_country", "seller_score",
                  "seller_feedback_count", "listing_kind"])
     # Three modes, and the third reads a different KIND of thing, so it gets
-    # its own dataclass rather than a Product with most columns null (§9).
+    # its own dataclass rather than a Product with most columns null.
     ok &= check("three modes map to a row class, auctions to its own",
                 ROW_CLASS_BY_MODE == {"listing": Product, "lot": Product,
                                       "auctions": Auction})
     ok &= check("the Auction row reuses `sku` for the id, like every other "
                 "schema in the family",
                 "sku" in [f.name for f in fields(Auction)])
-    # A column that is null on every row of every run should not exist (§9).
+    # A column that is null on every row of every run should not exist.
     # These four are null on every LISTING row and populated in --mode
     # product, which is a different thing and is why they are kept — pinned
     # so that removing them needs a measurement rather than a hunch.
@@ -1302,8 +1302,8 @@ def test_canary_separates_access_from_defect():
                 "ACCESS CONDITIONS ARE NOT DEFECTS" in wf)
 
     # A DAILY SCHEDULE, ON A ROUTE THAT NEEDS NO CREDENTIAL. For v0.1.x the
-    # canary was dispatch-only around a Scraping Browser secret that does not
-    # survive a day, and this check pinned "no cron" -- so it ran once
+    # canary was dispatch-only around a Scraping Browser secret, and this
+    # check pinned "no cron" -- so it ran once
     # (2026-09-11) and never again. Headful Chromium under xvfb on a stock
     # runner was then measured to pass every assertion with no secret at all
     # (2026-09-23, 72 rows over 3 pages), so the canary runs daily on that
@@ -1320,9 +1320,13 @@ def test_canary_separates_access_from_defect():
     ok &= check("the secret cannot leak into the local route",
                 "unset CATAWIKI_CDP_ENDPOINT" in wf)
     ok &= check("the reason the cdp route is not scheduled is written down",
-                "does not survive a" in wf)
-    ok &= check("the expired-secret case is named",
-                "expired" in wf.lower() and "refresh" in wf.lower())
+                "is NOT the\n#     scheduled route" in wf)
+    # Keyed on the 401, not on a lifetime: an endpoint's lifetime was never
+    # measured, and the canary must not claim one.
+    ok &= check("the invalid-secret case is named by its 401",
+                "401" in wf and "refresh" in wf.lower())
+    ok &= check("the canary claims no credential lifetime",
+                "survive a day" not in wf and "does not survive a" not in wf)
     return ok
 
 
@@ -1545,10 +1549,10 @@ def test_fingerprint_client_reads_env():
     # THE DEFECT THIS PINS, found the first time --fingerprint was run live
     # here: `--key` defaulted to
     # `os.environ.get("TWOCAPTCHA_KEY")` alone. So a key put in `.env` —
-    # which is exactly what §3, the README and .env.example instruct — worked
+    # which is exactly what the README and .env.example instruct — worked
     # for every engine and failed HERE with "No API key". A documented
-    # mechanism not applied on one path, which is the shape of half the
-    # defects §16 lists.
+    # mechanism not applied on one path, a defect shape the fingerprint
+    # client has had before.
     src = inspect.getsource(fpc.main)
     ok &= check("it loads .env itself, rather than hoping an engine did",
                 "env_config.load_env()" in src)
@@ -1611,7 +1615,7 @@ def test_fingerprint_application():
     # Dutch fingerprint. An English-speaking visitor in the Netherlands is
     # possible, but it is not what this fingerprint describes, and a locale
     # that contradicts the rest of the identity is the mismatch again. This
-    # was a defect in the copied fingerprint core that nothing had run (§16).
+    # was a defect in the copied fingerprint core that nothing had run.
     ok &= check("the locale is the fingerprint's own, not en-<country>",
                 kw.get("locale") == "nl-NL")
     ok &= check("the timezone is carried, so the browser cannot contradict it",
@@ -2077,7 +2081,7 @@ def test_env_config():
     # CONFIGURED, so `cp .env.example .env` and a run connected to
     # cb.2captcha.com with the string `{login}-zone-…` as its username and
     # got a 401 — a confusing failure a long way from its cause, which is
-    # what §3's rule exists to prevent.
+    # what keeping credentials in `.env` is meant to prevent.
     for raw in ('ws://{login}-zone-scraping_browser-country-id-pid-'
                 '{profileId}:{password}@cb.2captcha.com:9222',
                 'http://{user}:{password}@ap.proxy.2captcha.com:2334',
@@ -2243,7 +2247,7 @@ def test_proxy_pool():
     # was written to show. Every caller here passes the URL as its own `%s`
     # argument for that reason, and `_mask_credentials()` is what handles
     # arbitrary text. Asserting the CURRENT behaviour makes a future swap a
-    # failing check rather than an unreadable log (§10).
+    # failing check rather than an unreadable log.
     sentence = "a http://u:supersecret@h.example:8080 b"
     ok &= check("mask() on a sentence loses the host — the documented limit",
                 mask(sentence) == "?://?")
@@ -2344,7 +2348,7 @@ def test_engines(skips):
         # "Not painted yet" is not a fault, and every engine has to make that
         # distinction the same way — the first live search run of the
         # Playwright engine reported 0 rows and exit 4 because it did not.
-        # §17's rule, applied to this repo's own additions: a policy
+        # Applied to this repo's own additions: a policy
         # constant or a helper that nothing consults is the same defect as
         # dead code, and harder to see because the prose reads like
         # enforcement. All three of these were written, documented in the
@@ -2384,7 +2388,7 @@ def test_engines(skips):
 
     # THE FLAG CONTRACT, and the exact ways the engines differ from it.
     #
-    # §9 lists the flags every engine must offer. Checked rather than
+    # The family's flag contract lists the flags every engine must offer. Checked rather than
     # trusted, because a flag one engine has and another does not is the
     # drift page_flow.py and finish_run() exist to prevent, one level up —
     # and because the README documents these differences by name, so a new
@@ -2423,8 +2427,8 @@ def test_engines(skips):
 
     # `--fp-tags` MUST DEFAULT TO ONE OS-FAMILY TAG. It shipped in this
     # family as "Windows,Chrome,Desktop", which the fingerprint API rejects
-    # with HTTP 400 — so --fingerprint failed on every invocation, which is
-    # one of the six defects §16 of the family notes lists. Measured
+    # with HTTP 400 — so --fingerprint failed on every invocation, which was
+    # a known fingerprint-client defect. Measured
     # 2026-09-10 against the live API: `Windows` succeeds;
     # `Windows,Chrome,Desktop`, `Chrome` and `Desktop` each 400.
     for name in _ENGINE_MODULES:
@@ -2696,7 +2700,7 @@ def test_parse_is_gated_on_the_policy():
     # engine parsed whatever reached the parse line, so the `parse` column
     # of STATE_POLICY decided nothing and an engine could disagree with the
     # table — and with its twins — without anything noticing. That is the
-    # defect CLAUDE.md §17 names for constants, with a function instead.
+    # "policy nothing reads" defect, with a function instead of a constant.
     #
     # Measured across the family on 2026-09-23 by counting definitions
     # against readers: 7 of 24 repos defined it and none called it.
@@ -2785,6 +2789,343 @@ def test_scraper_api_sends_waitfor_as_an_object_and_reads_http_code():
     return ok
 
 
+def test_atomic_writes_and_modes():
+    group("output writes are atomic, and new files follow the umask")
+    ok = True
+    import output_writer as ow
+    tmp = tempfile.mkdtemp()
+    try:
+        good = os.path.join(tmp, "good.json")
+        ow.write_json([Product(url="https://www.catawiki.com/en/l/1", sku="1")], good)
+        before = open(good, "rb").read()
+
+        class Unserialisable:
+            pass
+        bad = Product(url="u", sku="2")
+        bad.title = Unserialisable()
+        raised = _raises(lambda: ow.write_json([bad], good))
+        ok &= check("a write that fails part-way raises", raised)
+        ok &= check("... and leaves the previous good JSON byte-identical",
+                    open(good, "rb").read() == before)
+        ok &= check("... and leaves no temp file behind",
+                    sorted(os.listdir(tmp)) == ["good.json"])
+
+        meta_before = None
+        ow.write_run_meta(os.path.join(tmp, "run"), {"status": "complete"})
+        meta_before = open(os.path.join(tmp, "run.meta.json"), "rb").read()
+        ok &= check("the sidecar writer goes through the atomic writer too",
+                    _raises(lambda: ow.write_run_meta(
+                        os.path.join(tmp, "run"), {"x": Unserialisable()}))
+                    and open(os.path.join(tmp, "run.meta.json"), "rb").read()
+                    == meta_before)
+
+        for name in ("write_json", "write_csv", "write_run_meta"):
+            src = inspect.getsource(getattr(ow, name))
+            ok &= check("%s writes through _atomic, never open(path, 'w')" % name,
+                        "_atomic(" in src and 'open(path, "w"' not in src)
+
+        # A NON-default umask in the matrix: under 022 every candidate rule
+        # agrees, which is how a flat 0o644 passed elsewhere.
+        for umask, want in ((0o022, 0o644), (0o002, 0o664), (0o077, 0o600)):
+            old = os.umask(umask)
+            try:
+                p = os.path.join(tmp, "new_%o.csv" % umask)
+                ow.write_csv([], p)
+                got = os.stat(p).st_mode & 0o777
+            finally:
+                os.umask(old)
+            ok &= check("a new file under umask %03o is %03o (got %03o)"
+                        % (umask, want, got), got == want)
+        kept = os.path.join(tmp, "kept.json")
+        open(kept, "w").close()
+        os.chmod(kept, 0o640)
+        ow.write_json([], kept)
+        ok &= check("an existing file keeps its own mode (0640)",
+                    os.stat(kept).st_mode & 0o777 == 0o640)
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+    return ok
+
+
+def test_csv_formula_cells_are_neutralised():
+    group("CSV cells that a spreadsheet would execute are escaped, JSON is not")
+    ok = True
+    import output_writer as ow
+    tmp = tempfile.mkdtemp()
+    try:
+        row = Product(url="https://www.catawiki.com/en/l/9", sku="9",
+                      title='=HYPERLINK("http://x")', brand="+cmd",
+                      subtitle="@SUM(A1)", price=-5.0,
+                      bid_status_text="plain text")
+        listy = Product(url="https://www.catawiki.com/en/l/8", sku="8")
+        listy.title = ["-first", "second"]
+        out = os.path.join(tmp, "f")
+        rc = finish_run([row, listy], out, "both", False, blocked=False,
+                        stop_reason="completed", pages_requested=1,
+                        pages_completed=1, start_url="s", final_url="f",
+                        extra={"csv_cells_escaped": "caller wins",
+                               "site_fact": 1})
+        ok &= check("the run still exits 0", rc == 0)
+        with open(out + ".csv", newline="", encoding="utf-8") as h:
+            rows = list(csv.DictReader(h))
+        ok &= check("'=' is prefixed with an apostrophe in CSV",
+                    rows[0]["title"] == "'" + '=HYPERLINK("http://x")')
+        ok &= check("'+' and '@' are prefixed too",
+                    rows[0]["brand"] == "'+cmd" and rows[0]["subtitle"] == "'@SUM(A1)")
+        ok &= check("a negative NUMBER is left a number", rows[0]["price"] == "-5.0")
+        ok &= check("ordinary text is untouched",
+                    rows[0]["bid_status_text"] == "plain text")
+        ok &= check("a joined list is escaped AFTER joining",
+                    rows[1]["title"] == "'-first | second")
+        for lead in ("\t", "\r", "\n", "-"):
+            ok &= check("lead %r is escaped" % lead,
+                        ow._csv_escape(lead + "x") == ("'" + lead + "x", True))
+        data = json.load(open(out + ".json", encoding="utf-8"))
+        ok &= check("JSON keeps the site's bytes",
+                    data[0]["title"] == '=HYPERLINK("http://x")')
+        meta = json.load(open(out + ".meta.json", encoding="utf-8"))
+        ok &= check("the caller's extra wins a collision with the count",
+                    meta.get("csv_cells_escaped") == "caller wins"
+                    and meta.get("site_fact") == 1)
+        out2 = os.path.join(tmp, "g")
+        finish_run([row, listy], out2, "both", False, blocked=False,
+                   stop_reason="completed", pages_requested=1,
+                   pages_completed=1, start_url="s", final_url="f")
+        meta2 = json.load(open(out2 + ".meta.json", encoding="utf-8"))
+        ok &= check("the sidecar counts the escaped cells (4)",
+                    meta2.get("csv_cells_escaped") == 4)
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+    return ok
+
+
+def _engine_function(engine_file, name):
+    """The source of one top-level function, read off DISK so the check runs
+    with no driver installed."""
+    src = open(os.path.join(REPO_ROOT, engine_file), encoding="utf-8").read()
+    tree = ast.parse(src)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return ast.get_source_segment(src, node), node
+    return None, None
+
+
+def test_solve_budget_covers_every_call_site():
+    group("every paid solve on a page goes through one budget")
+    ok = True
+    from unittest import mock
+    ok &= check("page_flow.SolveBudget allows SOLVES_PER_PAGE purchases",
+                [page_flow.SolveBudget(1).take() for _ in range(1)] == [True])
+    b = page_flow.SolveBudget(1)
+    b.take()
+    ok &= check("... and refuses the next", not b.take() and not b.allows())
+    for eng in ENGINE_FILES:
+        fetch_src, fetch = _engine_function(eng, "_fetch_one_page")
+        handler_src, handler = _engine_function(eng, "handle_captcha_if_present")
+        ok &= check("%s: both functions found" % eng,
+                    fetch is not None and handler is not None)
+        if fetch is None or handler is None:
+            continue
+        calls = [n for n in ast.walk(fetch) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", None) == "handle_captcha_if_present"]
+        ok &= check("%s: _fetch_one_page calls the handler at both sites" % eng,
+                    len(calls) == 2)
+        ok &= check("%s: every call site passes the SAME `budget`" % eng,
+                    calls and all(any(isinstance(a, ast.Name) and a.id == "budget"
+                                      for a in c.args) for c in calls))
+        made = [n for n in ast.walk(fetch) if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "budget"
+                        for t in n.targets)]
+        loops = [n for n in ast.walk(fetch) if isinstance(n, (ast.For, ast.While))]
+        in_loop = any(m in list(ast.walk(l)) for m in made for l in loops)
+        ok &= check("%s: one budget per page, made outside the retry loop "
+                    "(not reset by a retry or a rotation)" % eng,
+                    len(made) == 1 and not in_loop)
+
+        # BEHAVIOUR, driver-free: run the engine's own handler with the
+        # solver stubbed, a challenge always detected and nothing rendered,
+        # three times against one budget. One purchase, not three.
+        bought = []
+        challenge = CaptchaChallenge(kind="recaptcha_v2", sitekey="k",
+                                     page_url="https://www.catawiki.com/en/c/1")
+        ns = {
+            "logger": mock.MagicMock(), "page_flow": page_flow, "time": mock.MagicMock(),
+            "MIN_CARD_MATCHES": 2, "INJECT_TOKEN_JS": "",
+            "detect_recaptcha_v3": lambda *a, **k: challenge,
+            "detect_recaptcha_in_page": lambda *a, **k: None,
+            "reconcile_detections": lambda a, b: a or b,
+            "solve_recaptcha": lambda *a, **k: bought.append(1) or "token",
+            "_content_when_settled": lambda *a: "<html></html>",
+            "_content": lambda *a: "<html></html>",
+            "_ready_selector": lambda *a: "a",
+            "_driver": lambda *a: {"content": lambda: "<html></html>",
+                                   "count": lambda s: 0,
+                                   "current_url": lambda: challenge.page_url},
+            "WebDriverException": Exception,
+        }
+        try:
+            exec(compile(textwrap.dedent(handler_src), eng, "exec"), ns)
+        except Exception as e:  # noqa: BLE001
+            ok &= check("%s: handler compiles standalone (%s)" % (eng, e), False)
+            continue
+        args = mock.MagicMock(twocaptcha_key="x" * 8, mode="listing",
+                              solve_captcha="when-blocked",
+                              captcha_api="v2", min_score=0.7)
+        page = mock.MagicMock()
+        page.url = challenge.page_url
+        budget = page_flow.SolveBudget(page_flow.SOLVES_PER_PAGE)
+        for _ in range(3):
+            ns["handle_captcha_if_present"](page, args, budget)
+        ok &= check("%s: three handler runs on one page buy %d solve(s), "
+                    "not %d" % (eng, page_flow.SOLVES_PER_PAGE, len(bought)),
+                    len(bought) == page_flow.SOLVES_PER_PAGE)
+        bought.clear()
+        ns["detect_recaptcha_v3"] = lambda *a, **k: None
+        idle = page_flow.SolveBudget(1)
+        ns["handle_captcha_if_present"](page, args, idle)
+        ok &= check("%s: a page with no captcha spends nothing" % eng,
+                    idle.spent == 0 and not bought)
+    return ok
+
+
+def test_mirror_engines_guard_the_pool():
+    group("with no --proxy, no engine touches pool.<attr> unguarded")
+    ok = True
+    for eng in ENGINE_FILES:
+        src, fetch = _engine_function(eng, "_fetch_one_page")
+        if fetch is None:
+            ok &= check("%s: _fetch_one_page found" % eng, False)
+            continue
+        guarded = set()
+        for node in ast.walk(fetch):
+            if isinstance(node, (ast.If, ast.IfExp)) and (
+                    "has_pool" in ast.dump(node.test)
+                    or ast.dump(node.test) == ast.dump(ast.Name(id="pool", ctx=ast.Load()))):
+                body = node.body if isinstance(node, ast.If) else [node.body]
+                for part in body:
+                    for sub in ast.walk(part):
+                        guarded.add(id(sub))
+        bare = [n.lineno for n in ast.walk(fetch)
+                if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                and n.value.id == "pool" and id(n) not in guarded]
+        ok &= check("%s: every pool.<attr> in _fetch_one_page is guarded "
+                    "(unguarded at lines %s)" % (eng, bare), not bare)
+    return ok
+
+
+def test_numeric_flags_are_validated():
+    group("numeric flags refuse values that would make a run meaningless")
+    ok = True
+    import argparse as _ap
+
+    def refused(fn, v):
+        try:
+            fn(v)
+        except _ap.ArgumentTypeError:
+            return True
+        return False
+    ok &= check("positive_int refuses 0, -1, x",
+                all(refused(page_flow.positive_int, v) for v in ("0", "-1", "x")))
+    ok &= check("non_negative_int accepts 0 and refuses -1",
+                page_flow.non_negative_int("0") == 0
+                and refused(page_flow.non_negative_int, "-1"))
+    ok &= check("non_negative_float accepts 0 and refuses -0.5 and nan",
+                page_flow.non_negative_float("0") == 0.0
+                and refused(page_flow.non_negative_float, "-0.5")
+                and refused(page_flow.non_negative_float, "nan"))
+    want = {"--pages": "page_flow.positive_int",
+            "--concurrency": "page_flow.positive_int",
+            "--delay": "page_flow.non_negative_float",
+            "--retry-delay": "page_flow.non_negative_float",
+            "--proxy-block-retries": "page_flow.non_negative_int"}
+    for eng in ENGINE_FILES:
+        src = open(os.path.join(REPO_ROOT, eng), encoding="utf-8").read()
+        for flag, typ in want.items():
+            ok &= check("%s: %s goes through %s" % (eng, flag, typ),
+                        '"%s", type=%s' % (flag, typ) in src)
+    api = open(os.path.join(REPO_ROOT, "scraper_api_client.py"), encoding="utf-8").read()
+    ok &= check("scraper_api_client: --retries (extra attempts) refuses a negative",
+                '"--retries", type=page_flow.non_negative_int' in api)
+    ok &= check("scraper_api_client: --retry-delay refuses a negative",
+                '"--retry-delay", type=page_flow.non_negative_float' in api)
+    # The usage error for a foreign host printed "None ..." because the host
+    # was looked up with the very function that had just said it is unknown.
+    for eng in ENGINE_FILES:
+        src = open(os.path.join(REPO_ROOT, eng), encoding="utf-8").read()
+        ok &= check("%s: the unsupported-URL error does not prefix site_host()" % eng,
+                    'p.error(f"{site_host(args.url)} {why}.")' not in src)
+    return ok
+
+
+def test_credential_scan_is_relative_to_the_repo():
+    group("the credential scan works wherever the clone lives")
+    ok = True
+    import importlib.util
+    import shutil
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "_ci_checks_probe", os.path.join(REPO_ROOT, ".github", "ci_checks.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    tmp = tempfile.mkdtemp()
+    key = "3f8a1c9e4b7d2065" + "af13ce88b409d752"
+    try:
+        for ancestor in ("venv", ".venv", "__pycache__", "build/out"):
+            repo = Path(tmp) / ancestor / "catawiki-scraper"
+            repo.mkdir(parents=True)
+            (repo / "scratch.py").write_text('KEY = "%s"\n' % key)
+            # A real virtualenv INSIDE the repo is still skipped.
+            (repo / "myenv").mkdir()
+            (repo / "myenv" / "pyvenv.cfg").write_text("home = /usr\n")
+            (repo / "myenv" / "vendored.py").write_text('# %s\n' % key)
+            mod.REPO = repo
+            mod._VENV_CACHE.clear()
+            with redirect_stdout(io.StringIO()):
+                failed = mod.secret_check()
+            ok &= check("a clone under %s/ still scans and names the planted key"
+                        % ancestor, any("scratch.py" in f for f in failed))
+            ok &= check("... while a pyvenv.cfg directory inside it is skipped",
+                        not any("vendored.py" in f for f in failed))
+        empty = Path(tmp) / "empty"
+        empty.mkdir()
+        mod.REPO = empty
+        with redirect_stdout(io.StringIO()):
+            failed = mod.secret_check()
+        ok &= check("a scan that read 0 files fails instead of saying ok",
+                    any("0 files scanned" in f for f in failed))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return ok
+
+
+def test_no_private_citations():
+    group("shipped files cite no private notes")
+    ok = True
+    # Assembled from pieces so this file does not match itself.
+    tokens = ("CLAUDE" + ".md", "claude_" + "2scraper", "2scraper_" + "repo_rules",
+              "play" + "book")
+    section = re.compile("§" + r"\s*\d")
+    listed = subprocess.run(["git", "ls-files"], cwd=REPO_ROOT,
+                            capture_output=True, text=True)
+    files = [f for f in listed.stdout.split("\n") if f] if listed.returncode == 0 else []
+    ok &= check("the citation scan has files to read", len(files) > 10)
+    offenders = []
+    for f in files:
+        try:
+            text = open(os.path.join(REPO_ROOT, f), encoding="utf-8").read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        low = text.lower()
+        if section.search(text) or any(t.lower() in low for t in tokens):
+            offenders.append(f)
+    ok &= check("no tracked file (CHANGELOG and this suite included) cites "
+                "a private note or a numbered section: %s" % offenders,
+                not offenders)
+    return ok
+
+
 def main() -> int:
     ok = True
     # Checks that could not run because an optional engine library is absent.
@@ -2827,6 +3168,13 @@ def main() -> int:
     ok &= test_sample_output()
     ok &= test_x_debug_header_is_redacted()
     ok &= test_scraper_api_sends_waitfor_as_an_object_and_reads_http_code()
+    ok &= test_atomic_writes_and_modes()
+    ok &= test_csv_formula_cells_are_neutralised()
+    ok &= test_solve_budget_covers_every_call_site()
+    ok &= test_mirror_engines_guard_the_pool()
+    ok &= test_numeric_flags_are_validated()
+    ok &= test_credential_scan_is_relative_to_the_repo()
+    ok &= test_no_private_citations()
 
     print()
     if _failures:

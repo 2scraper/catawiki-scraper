@@ -11,6 +11,60 @@ or an empty column.
 
 ## [Unreleased]
 
+> **Behaviour changes.**
+> - CSV cells that begin with `=`, `+`, `-`, `@`, a tab, CR or LF now get a
+>   leading apostrophe in the CSV output only (JSON is unchanged), and the
+>   sidecar records how many as `csv_cells_escaped`.
+> - `--pages 0`, `--concurrency 0`, a negative `--delay`, `--retry-delay` or
+>   `--proxy-block-retries` (and a negative `--retries`/`--retry-delay` on
+>   `scraper_api_client.py`) are now usage errors (exit 2).
+> - Output files are written atomically. A new file gets the mode `open()`
+>   would have given it under your umask; an existing file keeps its mode.
+
+### Fixed
+
+- **One page could buy two captcha solves against a limit of one.** Each
+  engine runs its captcha handler before and after classifying a page, and
+  only the second call was counted, so the first repeated on every block
+  retry (2 solver calls per page at the default settings and 4 with block
+  retries enabled, reproduced with the solver stubbed). Both call sites now
+  share one per-page `page_flow.SolveBudget`, checked immediately before a
+  token is bought and not reset by a retry or a rotation. A page with no
+  captcha spends nothing from it. No challenge has been observed on
+  catawiki.com; this bounds the paid path for the day one appears.
+- **A failed write destroyed the previous good output.** `write_json`,
+  `write_csv` and the `.meta.json` sidecar truncated the file before writing,
+  so an exception half-way left invalid JSON where a good run had been. They
+  now write to a temporary file in the same directory, fsync it and rename it
+  over the target.
+- **CSV output could carry spreadsheet formulas** written by whoever listed a
+  lot. See the behaviour note above.
+- **Selenium and pyppeteer crashed with no `--proxy` once block retries were
+  enabled** (`AttributeError` on `pool.current`). Their block and load-failure
+  paths now rotate only when there is a pool and otherwise re-fetch through
+  the same path, as the Playwright engine does. Latent at the shipped
+  settings, where block retries are off.
+- **The credential scan read nothing when the clone lived under a directory
+  named `venv`, `.venv`, `.git` or `__pycache__`**, and still printed "ok".
+  Exclusions are now judged relative to the repo root, and a scan that read
+  0 files fails.
+- **A foreign `--url` produced `error: None www.ebay.com is not a Catawiki
+  host`.** The message no longer starts with "None", and the unreachable
+  fallback no longer describes a site with one language and no locale
+  prefix.
+- `.gitignore` covers `--dump-html X --pages N` dumps of any suffix
+  (`X.pageN`), a root-level `.html`, and scratch directories such as `live/`.
+- The README now describes exit 5 as "the pages were never obtained", which
+  is what the code returns it for, not only a remote API error. The canary
+  and the docs no longer claim a Scraping Browser endpoint lasts less than a
+  day: that was never measured, and a 401 is the signal that one is no
+  longer valid. The canary's exit-4 message names Catawiki's own payload and
+  lot card instead of another site's selectors.
+- Comments no longer cite numbered sections of private notes; each rule is
+  stated in place. A suite check keeps such citations out of every tracked
+  file. `tests.yml` runs the sample check from `ci_checks.py` instead of a
+  narrower inline copy.
+
 ## [0.1.1] — 2026-10-13
 
 > **Behaviour change:** `--retries 0` is now refused as a usage error (exit 2).

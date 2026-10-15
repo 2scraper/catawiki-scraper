@@ -153,14 +153,13 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
     real-world formats seen so far:
 
     1. An inline <script> calling grecaptcha.execute('SITEKEY', {action: '...'})
-       directly — seen on Kohl's.
+       directly, on another retail site.
     2. A <captcha-widget> custom element carrying the config as HTML
        attributes (data-captcha-type="recaptcha" data-version="v3"
        data-sitekey="..." data-action="..."), with the actual execute()
        call happening inside a bundled JS file, never appearing as
-       readable inline script text at all — confirmed live on the sibling
-       farfetch-scraper repo's target, in its sign-up modal, via DevTools
-       inspection. A previous version of this
+       readable inline script text at all — confirmed live on a retail
+       site's sign-up modal, via DevTools inspection. A previous version of this
        function, which only checked for format 1, reported "no captcha"
        on this exact page despite one being genuinely present — caught by
        manually inspecting the DOM, not by the detector itself, which is
@@ -209,7 +208,7 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
 
 # ---------------------------------------------------------------------------
 # Runtime detection (added 2026-08-24 — the static-HTML detector below no
-# longer matched the sibling farfetch-scraper repo's target)
+# longer matched a retail site it had been written against)
 # ---------------------------------------------------------------------------
 #
 # What changed there: the sign-up modal used to render

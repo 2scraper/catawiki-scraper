@@ -83,13 +83,11 @@ history needs a decision, not a red check on every push.
 
 Then the rest of the presentation, in the order that matters:
 
-1. `python3 smoke_test.py` green, and the canary dispatched at least once —
-   including its SKIP branch, which is what runs when the
-   `CATAWIKI_CDP_ENDPOINT` secret is absent. The canary has **no schedule**: a
-   Scraping Browser credential on this account does not survive a day, so it
-   runs on demand with a fresh secret rather than painting a badge that has
-   tested nothing. Put a schedule back the day a long-lived credential
-   exists.
+1. `python3 smoke_test.py` green, and the canary dispatched at least once.
+   Its scheduled route is headful Chromium under xvfb and needs no secret;
+   the Scraping Browser route (`-f route=cdp`) runs only on request, with a
+   `CATAWIKI_CDP_ENDPOINT` secret that is still valid (a 401 says it is
+   not).
 2. The repo description, homepage and topics set (see the family notes on
    what those should say).
 3. Only then the row in the org profile README — and check it with an

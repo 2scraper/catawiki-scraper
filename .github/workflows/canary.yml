@@ -43,10 +43,11 @@ name: canary
 #     make the badge green on days nothing was tested.
 #   * The Scraping Browser route is kept, but only on request: dispatch with
 #     `route: cdp` and a CATAWIKI_CDP_ENDPOINT secret set. It is NOT the
-#     scheduled route, because an endpoint on this account does not survive a
-#     day (every credential that was available was already returning 401
-#     `deny_no_user`), and a daily run against it would be
-#     either red every day or green having tested nothing.
+#     scheduled route because the scheduled one needs no credential at all,
+#     and a secret-backed route is one more thing that can go stale: when
+#     this was written every endpoint available was already answering 401
+#     `deny_no_user`. How long an endpoint stays valid was not measured and
+#     is not a fixed figure; a 401 is the signal that it no longer is.
 #
 #     gh workflow run canary.yml -R 2scraper/catawiki-scraper -f route=cdp
 #
@@ -108,9 +109,9 @@ jobs:
         # the run's own "this page added nothing new" terminator are all
         # there is.
         #
-        # --retries 4: the remote target was measured closing mid-scroll on
-        # three of six captures and succeeding on the next attempt. The
-        # engine's own block-retry budget covers that; this leaves headroom.
+        # --retries 4: headroom for a navigation timeout on a shared runner.
+        # The engine retries a page load that did not complete; a refusal is
+        # not retried by this flag.
         #
         # --headful on the local route is also the engine's default here; it
         # is spelled out because it is the whole reason this route works.
@@ -154,10 +155,9 @@ jobs:
         # Failing the job on ANY non-zero exit makes the canary red for
         # things that are nobody's bug. On the cdp route:
         #
-        #   * the SECRET EXPIRED. A Scraping Browser credential is not
-        #     forever — every one available when this repo was written
-        #     was already dead. When it stops
-        #     authenticating the run exits 5.
+        #   * the SECRET IS NO LONGER VALID. A Scraping Browser endpoint
+        #     can stop authenticating (it answers 401), and when it does the
+        #     run exits 5. How long one lasts is not a fixed figure.
         #   * ACCESS IS INTERMITTENT PER PROFILE, and a profile allows one
         #     live connection. A canary that collides with a person's run
         #     exits 5 with `profile_locked`, which says nothing about the
@@ -169,15 +169,15 @@ jobs:
         # timeout). Neither is a parser regression, so both warn there too,
         # with a message naming that route.
         #
-        # So: 3 (blocked), 5 (remote API error) and 6 (partial) are reported
+        # So: 3 (blocked), 5 (content never obtained) and 6 (partial) are reported
         # as WARNINGS and do not fail the job. What stays red is a run that
         # got in and found the wrong thing, or one that broke:
         #
         #   1  crashed
         #   2  the workflow's own arguments are wrong
         #   4  served a page and parsed ZERO rows from a category listing
-        #      that holds 60 per page — the tile anchor moved, which is
-        #      exactly what this canary exists to catch
+        #      that holds 24 lots per page — the payload or the lot anchor
+        #      moved, which is exactly what this canary exists to catch
         #
         # A warning must not read as a pass, either. Each one writes to the
         # step summary as well, so the run page says in words that the canary
@@ -198,9 +198,9 @@ jobs:
             5)
               tested=false
               if [ "$route" = "cdp" ]; then
-                echo "::warning::Remote API error (exit 5) — the Scraping Browser endpoint refused the connection, so nothing was tested and this run is not failed. If the log says 'profile_locked', another run still holds this pid: give CI its own. Otherwise the CATAWIKI_CDP_ENDPOINT secret has most likely expired and needs refreshing."
+                echo "::warning::Remote API error (exit 5) — the Scraping Browser endpoint refused the connection, so nothing was tested and this run is not failed. If the log says 'profile_locked', another run still holds this pid: give CI its own. If the log shows HTTP 401, the CATAWIKI_CDP_ENDPOINT secret is no longer valid: refresh it."
                 echo "### Canary did NOT test anything (exit 5, endpoint refused)" >> "$GITHUB_STEP_SUMMARY"
-                echo "The most likely cause is an expired \`CATAWIKI_CDP_ENDPOINT\` secret. Refresh it, or dispatch with route=local." >> "$GITHUB_STEP_SUMMARY"
+                echo "A 401 in the log means the \`CATAWIKI_CDP_ENDPOINT\` secret is no longer valid: refresh it, or dispatch with route=local." >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "::warning::The page was never obtained (exit 5) on the local xvfb route — a navigation timeout or a browser that did not start, so nothing was tested and this run is not failed. If it repeats daily, read the scrape step's log: that is a runner-side change, not a parser one."
                 echo "### Canary did NOT test anything (exit 5, page never obtained)" >> "$GITHUB_STEP_SUMMARY"
@@ -208,11 +208,11 @@ jobs:
               fi ;;
             6)
               tested=false
-              echo "::warning::Partial run (exit 6) — some pages were gathered and the run then stopped early, usually the remote target closing mid-scroll. canary_run.meta.json names which pages failed. Not failed, because on this site that is an access condition; if it repeats on every run, suspect pagination instead."
+              echo "::warning::Partial run (exit 6) — some pages were gathered and the run then stopped early (a page timed out or was refused). canary_run.meta.json names which pages failed. Not failed, because on this site that is an access condition; if it repeats on every run, suspect pagination instead."
               echo "### Canary tested only PART of the run (exit 6)" >> "$GITHUB_STEP_SUMMARY"
               echo "See \`pages_failed\` in the sidecar artefact." >> "$GITHUB_STEP_SUMMARY" ;;
             4)
-              echo "::error::Ran fine but parsed 0 rows (exit 4) on a category listing that holds 60 products per page. Either the grid container (data-ssr=productsCategoryL2/L3SSR) or the tile anchor (a[data-testid=lnkProductContainer]) has moved — this is the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
+              echo "::error::Ran fine but parsed 0 rows (exit 4) on a category listing that holds 24 lots per page. Either the page's __NEXT_DATA__ lot payload or the lot card (article.c-lot-card__container, linking to /l/) has moved — this is the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
               exit 1 ;;
             2)
               echo "::error::Bad usage (exit 2) — the workflow's own arguments are wrong, not the site."

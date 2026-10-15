@@ -2,7 +2,7 @@
 
 Catawiki answers a request five ways, and four of them want a different
 response, which is why this module exists rather than the same triage being
-written three times inside three engines and drifting apart (§1):
+written three times inside three engines and drifting apart:
 
     content    the site served its listing payload
     empty      a search that matched nothing -- and it comes with 24
@@ -23,7 +23,7 @@ passes its own driver's primitives and keeps its browser plumbing to itself:
     content() -> Optional[str]      current HTML, None if unavailable
     sleep(ms) -> None               wait
 
-No JavaScript crosses that boundary in either direction (§1): Selenium's
+No JavaScript crosses that boundary in either direction: Selenium's
 `execute_script` takes a function BODY with an explicit `return` where
 Playwright and pyppeteer take `() => expr`, so the shared module names the
 OPERATION and the engine spells it in its own driver's dialect.
@@ -72,7 +72,7 @@ EMPTY_DOM_BYTES = 100
 # and the favourite count all arrive at hydration.
 #
 # So a readiness wait on the card count is satisfied instantly, at 24 out of
-# 24, while every price on the page is still blank -- §8's "a selector
+# 24, while every price on the page is still blank -- "a selector
 # matching the WRONG element is worse than one matching nothing", in the
 # shape it takes here. The anchor is therefore a price node WITH SOMETHING IN
 # IT.
@@ -96,7 +96,7 @@ READY_SELECTOR_AUCTIONS = 'a[href*="/a/"]'
 # Prices fill in ALL AT ONCE rather than trickling: 0 non-empty at 1.1s,
 # 1.4s, 1.8s and 2.1s, then 24 of 24 at 2.4s (category), 1.9s (search) and
 # 2.4s (category page 2). So the threshold does not need to chase a partial
-# fill -- it needs to be above 1, per §5, because waiting for a single match
+# fill -- it needs to be above 1, because waiting for a single match
 # resolves on an unrelated node.
 MIN_CARD_MATCHES = 8
 MIN_CARD_MATCHES_LOT = 1
@@ -188,7 +188,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     `status` is positional and comes SECOND, matching `detect_page_state`.
     Getting that wrong is not a style question: an engine calling this as
     `classify(html, url=...)` crashes on its first fetch, and nothing short of
-    a live run or a signature-binding check sees it (§17).
+    a live run or a signature-binding check sees it.
     """
     if html is None:
         # A bare navigation failure. On this site that IS what a refusal
@@ -199,7 +199,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
 
 
 # The retry/solve/blocked decision as DATA rather than as three copies of an
-# if-chain in three engines (§1).
+# if-chain in three engines.
 #
 #   parse    is there anything on this page worth writing down?
 #   retry    would fetching it again, from a different exit, plausibly help?
@@ -215,7 +215,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     # downstream can tell them from real ones.
     "empty":     {"parse": False, "retry": False, "solve": False, "blocked": False},
     # Served, and still painting. Wants the readiness wait, not another
-    # fetch: refetching a shell just buys another shell (§18).
+    # fetch: refetching a shell just buys another shell.
     "shell":     {"parse": True,  "retry": False, "solve": False, "blocked": False},
     "challenge": {"parse": False, "retry": True,  "solve": True,  "blocked": False},
     "blocked":   {"parse": False, "retry": True,  "solve": False, "blocked": True},
@@ -260,7 +260,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 # So the retry budget for a block is spent on a change that cannot help. It
 # is deliberately 0 here, and the engines
 # read this constant rather than computing their own budget -- a policy
-# constant nothing consults is the same defect as dead code (§17).
+# constant nothing consults is the same defect as dead code.
 RETRY_ON_BLOCKED = False
 BLOCK_RETRIES_WITHOUT_POOL = 0
 BLOCK_RETRIES_WITH_POOL = 0
@@ -268,6 +268,43 @@ BLOCK_RETRIES_WITH_POOL = 0
 # One solve per page. Detection is broad on purpose, but a second solve on
 # the same page has never been the answer to the first one failing.
 SOLVES_PER_PAGE = 1
+
+
+class SolveBudget:
+    """The one per-page allowance every paid solve goes through.
+
+    Each engine runs its captcha handler twice per fetch attempt: once before
+    the page is classified (so a challenge is cleared before anything is
+    judged) and once after, for the state that says the page really is
+    gated. Before this class only the second call was counted, so one page
+    could buy two solves against a limit of one, and more on every block
+    retry. Both call sites now hand the handler the SAME budget, and the
+    handler asks it immediately before buying a token — so a page with no
+    captcha on it spends nothing, and a page with one cannot buy more than
+    `limit`, whichever call site reaches it.
+
+    One budget per PAGE, created before the block-retry loop: it is not reset
+    by a retry or by an exit rotation, because a fresh exit is a reason to
+    re-fetch, not a fresh allowance to spend.
+
+    Driver-free on purpose, so the three engines share one implementation
+    rather than three counters that can drift.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = limit
+        self.spent = 0
+
+    def allows(self) -> bool:
+        return self.spent < self.limit
+
+    def take(self) -> bool:
+        """Claim one purchase. Call immediately BEFORE buying a token; False
+        means do not buy."""
+        if self.spent >= self.limit:
+            return False
+        self.spent += 1
+        return True
 
 
 def block_advice(html: Optional[str], headless: bool,
@@ -349,6 +386,44 @@ def attempts(value: str) -> int:
     return n
 
 
+def positive_int(value: str) -> int:
+    """argparse type for a count that must be at least 1 (--pages,
+    --concurrency). Zero pages or zero workers would fetch nothing and then
+    report on a run that never asked the site anything."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer")
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {n}")
+    return n
+
+
+def non_negative_int(value: str) -> int:
+    """argparse type for a count of EXTRA tries (--proxy-block-retries,
+    the Scraper API's --retries), where 0 is legal and a negative is not."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer")
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {n}")
+    return n
+
+
+def non_negative_float(value: str) -> float:
+    """argparse type for a pause in seconds (--delay, --retry-delay). A
+    negative pause makes `time.sleep` raise mid-run, after pages were
+    already fetched."""
+    try:
+        x = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number")
+    if not x >= 0:  # also rejects nan
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {value}")
+    return x
+
+
 def mode_url_mismatch(mode: str, url: str, kind: str) -> Optional[str]:
     """The usage error for a --mode that cannot read this URL, or None."""
     if mode == "lot" and kind != "lot":
@@ -386,7 +461,7 @@ RETRIES_HELP = ("Attempts per page load before giving up (default 3, "
 # ---------------------------------------------------------------------------
 # Pagination
 # ---------------------------------------------------------------------------
-# Three layers, weakest last (§7), and on this site the strongest one is
+# Three layers, weakest last, and on this site the strongest one is
 # arithmetic rather than a link: page 1's payload states `total` and
 # `lotsPerPage`, so every page's address is knowable at once and workers can
 # be handed independent pages without following a chain.
@@ -412,8 +487,8 @@ def pagination_is_addressable(page1_url: str,
 
     True for both listing kinds: `?page=N` is the site's own convention, page
     1's payload states the total, and a fetched `?page=2` came back with
-    `currentPage: 2` -- the convention and the site agree, which is what §7
-    requires before planning page URLs up front.
+    `currentPage: 2` -- the convention and the site agree, which has to hold
+    before planning page URLs up front.
     """
     if not paginates_by_url(page1_url):
         return False
@@ -432,7 +507,7 @@ def _resolve(base_url: str, href: str) -> str:
     absolute URL without resolving it first makes every comparison fail. That
     reads as "the site's link disagrees with the convention", which sends the
     caller down the link-chaining path and quietly costs it `--concurrency`
-    (§7) -- while looking like a deliberate safety decision.
+    -- while looking like a deliberate safety decision.
     """
     return urljoin(base_url, href) if href else href
 
@@ -446,7 +521,7 @@ def _as_hrefs(next_href: Union[str, Iterable[str], None]) -> List[str]:
     is what took the FIRST live run down -- `TypeError: Cannot mix str and
     non-str arguments`, from `urljoin` being handed a list -- and nothing
     short of running it saw that, because the offline checks called it the
-    way its author was thinking. §17's first lesson, earned again.
+    way its author was thinking. Run the code, not just the checks.
     """
     if next_href is None:
         return []
@@ -558,7 +633,7 @@ def concurrency_limit(url: str) -> Optional[int]:
 def concurrency_refusal(url: str) -> Optional[str]:
     """Why concurrency above 1 is refused for this URL, or None.
 
-    Refused WITH the reason (§18): a lot page and the auctions index have no
+    Refused WITH the reason: a lot page and the auctions index have no
     page 2 at all, so there is nothing for a second worker to fetch, and
     silently running one worker would look like the flag did something.
     """
