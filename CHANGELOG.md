@@ -11,6 +11,8 @@ or an empty column.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-15
+
 > **Behaviour changes.**
 > - CSV cells that begin with `=`, `+`, `-`, `@`, a tab, CR or LF now get a
 >   leading apostrophe in the CSV output only (JSON is unchanged), and the
@@ -225,6 +227,7 @@ offline suite.
   told not to use — there was no way to switch a `.env` setting off from the
   command line at all.
 
-[Unreleased]: https://github.com/2scraper/catawiki-scraper/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/2scraper/catawiki-scraper/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/2scraper/catawiki-scraper/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/2scraper/catawiki-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/catawiki-scraper/releases/tag/v0.1.0
