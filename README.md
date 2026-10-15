@@ -116,6 +116,12 @@ original_price, discount_pct, rating, review_count, in_stock, image_url,
 category, price_source, page, position`) and this site's own columns after it.
 `sample_output.json` and `sample_output.csv` are cut from a real run.
 
+In the CSV only, a text cell that starts with `=`, `+`, `-`, `@`, a tab or a
+line break gets a leading apostrophe so a spreadsheet shows it as text rather
+than running it as a formula; numbers are left alone and the JSON keeps the
+site's text unchanged. The sidecar's `csv_cells_escaped` says how many cells
+were changed.
+
 The columns that need explaining, because an auction is not a shop:
 
 **`price` means three different things, and `bid_kind` says which.**
@@ -175,8 +181,10 @@ The auction's own page is the authority, and it carries its lots too.
 
 ### Exit codes
 
-`0` ok · `1` crash · `2` bad usage · `3` blocked · `4` zero lots · `5` remote
-API error · `6` partial. Every run writes `<out>.meta.json` beside its output
+`0` ok · `1` crash · `2` bad usage · `3` blocked · `4` zero lots · `5` the
+pages were never obtained (a navigation timeout, a dead or unauthenticated
+proxy, a refused Scraping Browser connection, a Scraper API error) and
+nothing was gathered · `6` partial. Every run writes `<out>.meta.json` beside its output
 with `status`, `stop_reason` and **which** pages failed by number. A failed
 run writes no sidecar and leaves the previous good output in place — a run
 that finds nothing does not overwrite last night's data unless you pass
@@ -410,7 +418,8 @@ pages, 72 of them priced, `status=complete`. So a green badge means the site
 was parsed that morning; a red one means something changed.
 
 The Scraping Browser route is kept for a manual check, but it is not what the
-schedule runs, because an endpoint credential here does not last a day:
+schedule runs: the scheduled route needs no credential, and a secret-backed
+route can go stale (an endpoint that is no longer valid answers 401):
 
 ```bash
 gh secret set CATAWIKI_CDP_ENDPOINT --repo <your-org>/catawiki-scraper

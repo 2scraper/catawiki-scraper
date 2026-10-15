@@ -395,7 +395,7 @@ def _next_page_candidates(session, page_num: int) -> List[str]:
                                           hrefs or [])
 
 
-def handle_captcha_if_present(session, args) -> bool:
+def handle_captcha_if_present(session, args, budget) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Same detectors, same reconciliation and the same "detected is not
@@ -432,6 +432,14 @@ def handle_captcha_if_present(session, args) -> bool:
                    challenge.kind, challenge.source, challenge.sitekey)
     if not args.twocaptcha_key:
         logger.warning("No 2captcha API key, so this challenge cannot be solved.")
+        return False
+    # Checked immediately BEFORE the purchase, and shared by both call
+    # sites in _fetch_one_page, so a page cannot buy more than
+    # SOLVES_PER_PAGE however many times this handler runs on it.
+    if not budget.take():
+        logger.info("Not buying another solve on this page: %d of %d already "
+                    "bought, and a second solve is a second charge for the "
+                    "same answer.", budget.spent, budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -474,10 +482,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     block_retries = 0 if not page_flow.RETRY_ON_BLOCKED else (
         args.proxy_block_retries if has_pool
         else page_flow.BLOCK_RETRIES_WITHOUT_POOL)
-    # Counted across the whole block-retry loop, not per attempt: a page that
+    # ONE budget for the whole block-retry loop and for BOTH captcha call
+    # sites below, not per attempt or per call site: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget(page_flow.SOLVES_PER_PAGE)
 
     for block_attempt in range(block_retries + 1):
         logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
@@ -513,7 +522,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             break
 
 
-        if handle_captcha_if_present(session, args):
+        if handle_captcha_if_present(session, args, budget):
             time.sleep(1)
 
         html = d["content"]() or ""
@@ -550,10 +559,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # capture of this site has ever produced. Wired up because a bot
         # manager can be switched on between deploys, and bounded by
         # SOLVES_PER_PAGE so a speculative path cannot become a bill.
-        if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+        if page_flow.should_solve(state) and budget.allows():
+            if handle_captcha_if_present(session, args, budget):
                 time.sleep(1)
                 html = d["content"]() or html
                 state = page_flow.classify(html, url=d["current_url"]())
@@ -578,12 +585,25 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # spend the budget on a change that cannot help. The branch stays so
         # the budget, not the code path, is what a future measurement edits.
         if block_attempt < block_retries:
-            logger.warning("Page %d came back as %s from %s — retrying from "
-                           "another exit (%d/%d).", page_num, state,
-                           mask(pool.current), block_attempt + 1, block_retries)
-            pool.advance(f"{state} on page {page_num}")
-            session.relaunch()
-            d = _driver(session)
+            if has_pool:
+                logger.warning("Page %d came back as %s from %s — retrying from "
+                               "another exit (%d/%d).", page_num, state,
+                               mask(pool.current), block_attempt + 1, block_retries)
+                pool.advance(f"{state} on page {page_num}")
+                session.relaunch()
+                d = _driver(session)
+            else:
+                # No pool, so nowhere else to go: re-fetch through the same
+                # access path after a pause, as the Playwright engine does.
+                # Without this branch a run with no --proxy crashed here on
+                # `pool.current` (pool is None) the moment block retries were
+                # enabled.
+                pause = args.retry_delay * (block_attempt + 1)
+                logger.warning("Page %d came back as %s — re-fetching through "
+                               "the same access path in %.1fs (%d/%d).",
+                               page_num, state, pause, block_attempt + 1,
+                               block_retries)
+                time.sleep(pause)
 
     if load_failed:
         logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
@@ -947,14 +967,14 @@ def parse_args():
     p.add_argument("--mode", choices=["listing", "lot", "auctions"],
                    default="listing", help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None, help="Label to tag output rows with.")
-    p.add_argument("--pages", type=int, default=1, help=page_flow.PAGES_HELP)
-    p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--pages", type=page_flow.positive_int, default=1, help=page_flow.PAGES_HELP)
+    p.add_argument("--delay", type=page_flow.non_negative_float, default=2.0, help="Delay between pages, seconds")
+    p.add_argument("--concurrency", type=page_flow.positive_int, default=1, metavar="N",
                    help="Accepted for flag parity and IGNORED here: parallel "
                         "page fetching lives in playwright_scraper.py.")
     p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help=page_flow.RETRIES_HELP)
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.non_negative_float, default=2.0,
                    help="Seconds before the first retry, doubling thereafter")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="catawiki_products", help="Output file prefix")
@@ -968,7 +988,7 @@ def parse_args():
                         "Wins over --proxy.")
     p.add_argument("--proxy-rotate", choices=list(ROTATE_MODES), default="per-run")
     p.add_argument("--proxy-shuffle", action="store_true")
-    p.add_argument("--proxy-block-retries", type=int, default=2)
+    p.add_argument("--proxy-block-retries", type=page_flow.non_negative_int, default=2)
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 rows were found.")
@@ -1039,11 +1059,13 @@ def parse_args():
         # empty category.
         why = unsupported_reason(args.url)
         if why:
-            p.error(f"{site_host(args.url)} {why}.")
-        p.error(f"{site_host(args.url) or args.url!r} is not Catawiki. This "
-                f"scraper reads catawiki.com, the site's only "
-                f"storefront — one language, one currency, no per-country "
-                f"hostname and no locale prefix.")
+            # `why` already names the host or the path; prefixing
+            # site_host() printed "None" for every foreign host.
+            p.error(f"{why}.")
+        p.error(f"{args.url!r} is not a Catawiki URL this scraper can read: "
+                f"it reads catawiki.com category (/c/), search (/s), lot "
+                f"(/l/) and auction (/a) pages under a locale prefix such "
+                f"as /en/ or /nl/.")
     kind = listing_kind(args.url)
     mismatch = page_flow.mode_url_mismatch(args.mode, args.url, kind)
     if mismatch:

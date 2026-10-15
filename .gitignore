@@ -24,11 +24,30 @@ live_results.zip
 *_debug.html
 *_debug.png
 *.html.page*
+# --dump-html X --pages N writes X.page1 ... X.pageN whatever X's suffix is,
+# so `canary_dump.json.page3` would be neither *.json nor *.html.page*.
+*.page[0-9]*
+# A raw dump at the repo root: the landing page aside (below), no page this
+# project ships is a bare root-level .html.
+/*.html
 
 # --- captures kept for parser work ---------------------------------------
 # The smoke suite's fixtures are committed (trimmed, inside smoke_test.py);
 # the multi-megabyte originals they were cut from are not.
 captures/
+# Scratch directories by KIND, not by one remembered name: a raw capture
+# reached `git add -A` in a sibling through a `live/` nobody had listed.
+live/
+out/
+output/
+run/
+runs/
+result/
+results/
+tmp/
+scratch/
+dump/
+dumps/
 
 # --- the landing page and the proxy list ---------------------------------
 # Both live outside the repo on purpose: the landing page is published
@@ -73,7 +92,7 @@ secrets*
 # recoverable only because that repo was private at the time. On 2026-09-17
 # a sibling had an untracked `.env.bak` holding a 32-hex key in a PUBLIC
 # repository, one `git add -A` from publication. Craigslist was fixed then
-# and the fix never reached anyone else, which is §16's rule unapplied: when
-# you fix one, check the siblings.
+# and the fix never reached anyone else: when you fix one, check the
+# siblings.
 .env*
 !.env.example

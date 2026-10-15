@@ -56,7 +56,7 @@ ASSET = ('<img src="https://assets.catawiki.nl/assets/x/thumb2_x.jpg"/>'
          '<link rel="preconnect" href="https://assets.catawiki.nl">')
 KEEP_CLASS = re.compile(r'^c-lot-card')
 
-# Patterns, not literals, so the NEXT capture's values are caught too (§10).
+# Patterns, not literals, so the NEXT capture's values are caught too.
 SCRUB = [
     (re.compile(r'("(?:highestBidderToken|bidderToken)"\s*:\s*")[0-9a-f]{16,}(")'),
      r'\1PLACEHOLDER-BIDDER-TOKEN\2'),

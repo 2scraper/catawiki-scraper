@@ -29,7 +29,7 @@ the SSR supplies everything else. On a LOT PAGE the opposite is true:
 bid history and the sold/reserve flags, so the DOM is not needed and must not
 be used — a lot page renders a "similar lots" carousel of 30+ OTHER lots'
 prices in the same `c-lot-card__price` class the listing uses for its own
-(§4's junk-link data theft, in a new costume).
+(a neighbour's link stealing a lot's data, in a new costume).
 
 What `price` means on an auction site
 ------------------------------------
@@ -68,7 +68,7 @@ logger = logging.getLogger("product_parser")
 HOSTS = ("catawiki.com", "www.catawiki.com")
 
 # Taken from the site's OWN `<link rel="alternate" hreflang=...>` set rather
-# than guessed (§5). One host, 18 locales as a path prefix -- and two of them
+# than guessed. One host, 18 locales as a path prefix -- and two of them
 # carry CAPITALS, so a lowercasing normaliser would break Chinese.
 LOCALES = ("en", "nl", "de", "fr", "it", "es", "pt", "da", "sv", "no",
            "pl", "el", "hu", "ro", "fi", "ja", "zh-Hans", "zh-Hant")
@@ -91,7 +91,7 @@ def site_host(url: str) -> Optional[str]:
 def unsupported_reason(url: str) -> Optional[str]:
     """Why this URL cannot be scraped, in the reader's terms, or None.
 
-    Says WHAT is wrong rather than just refusing (§5): "is not a Catawiki
+    Says WHAT is wrong rather than just refusing: "is not a Catawiki
     URL" sends someone hunting for a typo when the real problem is that they
     passed a lot page to listing mode.
     """
@@ -155,7 +155,7 @@ SELECTORS = {
     # amount__bWWF4`), and a URL is a contract with search engines.
     "item_link": 'a[href*="/l/"]',
     # The listing card. `article.c-lot-card__container` is the outermost node
-    # covering exactly ONE lot, which is what §4 asks for -- a card links to
+    # covering exactly ONE lot, which is where tile scoping must stop -- a card links to
     # its lot more than once (image and title), so a scope that stopped at
     # "more than one lot link" would never leave the anchor.
     "lot_card": "article.c-lot-card__container",
@@ -164,7 +164,7 @@ SELECTORS = {
     "card_timer": ".c-lot-card__timer",
     "card_favorites": ".c-lot-card__top-left",
     # Lot page. Matched by SUBSTRING because the tail is a build hash that
-    # changes on the next deploy (§4).
+    # changes on the next deploy.
     "lot_bid_amount": '[class*="LotBidStatusSection_bid-amount"]',
     "lot_bid_status": '[class*="LotBidStatusSection_subtitle-content"]',
 }
@@ -363,7 +363,7 @@ def total_pages(html: str, url: str = "") -> Optional[int]:
     """Pages this listing has, from ARITHMETIC and capped by the site's own
     limit -- no selector, no link-chaining.
 
-    This is the strongest form §7 asks for: page 1's payload states `total`
+    This is the strongest form of pagination planning: page 1's payload states `total`
     and `lotsPerPage`, so every page's address is knowable at once and
     workers can be handed independent pages.
     """
@@ -428,7 +428,7 @@ _BID_KIND_BY_KEY = {
 # Zero-width characters are the site's own empty-price placeholder, and they
 # are the reason `.c-lot-card__price` is present on 24 of 24 cards while 2-3
 # of them hold no price at all. A truthiness check on the node reports 100%
-# coverage and writes an invisible character into every row (§10).
+# coverage and writes an invisible character into every row.
 _ZERO_WIDTH = "​‌‍⁠﻿"
 
 
@@ -464,7 +464,7 @@ def bid_kind_labels(page_props: Optional[dict]) -> Dict[str, str]:
 #   1.535 €  de                symbol last
 #   €27      any               no grouping
 # and the German timer beside it uses NBSP, so no-break variants have to be
-# part of the grouping class or `1 535 €` parses as 535 (§4).
+# part of the grouping class or `1 535 €` parses as 535.
 _GROUP_SPACES = "    "
 _AMOUNT = (r"\d{1,3}(?:[.," + _GROUP_SPACES + r"]\d{3})+(?:[.,]\d{1,2})?"
            r"|\d+(?:[.,]\d{1,2})?")
@@ -507,7 +507,7 @@ def prices_in(text: str) -> List[float]:
 
     Removed first rather than rejected afterwards: a rejected match has
     already consumed the currency symbol, so skipping it loses the real price
-    too (§4).
+    too.
     """
     out: List[float] = []
     for match in _PRICE_RE.finditer(_PCT_RE.sub(" ", text or "")):
@@ -531,7 +531,7 @@ def price_in(text: str) -> Optional[float]:
 # refused request with a 394-byte "Access Denied" page whose only clue is an
 # `errors.edgesuite.net` reference id. Chromium's own network-error page is
 # the same problem one step worse -- it carries `<title>www.catawiki.com</title>`
-# and would pass a title check (§18).
+# and would pass a title check.
 #
 # What every page the site actually serves has, and neither refusal does, is
 # a reference to Catawiki's own asset hosts.
@@ -542,11 +542,11 @@ _ASSET_MIN_MATCHES = 2
 # Vendor markers are deliberately SHORT of `akamai`. Catawiki IS fronted by
 # Akamai and its refusal is an Akamai page -- but the string appears in the
 # response HEADER (`server: AkamaiGHost`), not in the body of a good page or
-# a bad one: 0 occurrences in all six captures checked. §18's rule is that a
+# a bad one: 0 occurrences in all six captures checked. The rule is that a
 # marker matching a good page is worse than no marker; the corollary is that
 # a marker matching NEITHER is not a marker at all.
 #
-# Two sets, because §8's "detected is not blocking" begins with not calling
+# Two sets, because "detected is not blocking" begins with not calling
 # them the same thing:
 #
 #   BLOCK_MARKERS          the site refused. Nothing to solve and nothing to
@@ -585,8 +585,8 @@ BOT_CHALLENGE_MARKERS = (
 # `recaptcha/hunter.js`, plus a `data-ts-input="cf-turnstile-response"`
 # attribute. But none of the markers above matches that capture even WITHOUT
 # stripping -- measured: `detect_bot_challenge` returns None and
-# `detect_page_state` returns "content" on it -- so the guard §8 describes
-# would be code that looks load-bearing and never runs (§17).
+# `detect_page_state` returns "content" on it -- so the extension-tag guard
+# would be code that looks load-bearing and never runs.
 #
 # Add it back together WITH any broadening of the set above. A bare
 # `recaptcha`, a bare `cf-turnstile` or a hunter path are exactly the strings
@@ -599,7 +599,7 @@ def served_by_catawiki(html: str) -> bool:
     The primary signal, and the only one that answers correctly for a
     browser-generated error page: Chromium's own network-error page carries
     `<title>www.catawiki.com</title>`, so a title check calls it a real page,
-    and it holds no vendor marker of any kind (§18).
+    and it holds no vendor marker of any kind.
     """
     return len(_ASSET_MARKER.findall(html or "")) >= _ASSET_MIN_MATCHES
 
@@ -647,8 +647,8 @@ def detect_page_state(html: str, status: Optional[int] = None,
     """What kind of answer this is: content, empty, blocked, challenge or
     shell.
 
-    Ordered by how much each signal PROVES, not by what is cheapest to check
-    (§17). An unambiguous positive -- the payload holding lots -- outranks
+    Ordered by how much each signal PROVES, not by what is cheapest to check.
+    An unambiguous positive -- the payload holding lots -- outranks
     the asset-reference threshold, so a leanly-built real page cannot be
     reported as blocked; and the vendor marker scan only ever refines a state
     that has already gone wrong.
@@ -692,7 +692,7 @@ def detect_page_state(html: str, status: Optional[int] = None,
 
     # 6. Served, built from the site's assets, and holding no payload yet.
     #    This is a page that is still painting, and it wants a WAIT rather
-    #    than a retry -- retrying a shell just fetches another shell (§18).
+    #    than a retry -- retrying a shell just fetches another shell.
     return "shell"
 
 
@@ -745,7 +745,7 @@ def parse_products(html: str, url: str, page: int = 1,
                    category: Optional[str] = None) -> List[Product]:
     """Rows for one listing page, in the payload's own order.
 
-    Payload order is page order, which is what §8 requires: a dedupe that
+    Payload order is page order, which is what the merge needs: a dedupe that
     mutates a running set inside a fetch loop makes the output depend on
     which page finished first.
     """
@@ -775,7 +775,7 @@ def parse_products(html: str, url: str, page: int = 1,
             title=_clean(lot.get("title")) or None,
             # No brand field anywhere on a listing. A title here reads
             # "Cartier - Tank Must de Cartier PM - ..." and splitting on the
-            # dash would be a guess presented as a fact (§8); the lot page's
+            # dash would be a guess presented as a fact; the lot page's
             # own `specifications` carry a real Brand and fill this in
             # --mode lot.
             brand=None,
@@ -905,7 +905,7 @@ def parse_lot_page(html: str, url: str,
     # names are translated (909 is "Brand" on /en and "Merk" on /nl, and the
     # id is 909 on both), so a name-keyed lookup returns a brand on English
     # pages and null on the other seventeen locales -- which is exactly how
-    # it read before a second locale was run (§15).
+    # it read before a second locale was run.
     specs = {s.get("specificationId"): s.get("value")
              for s in (details.get("specifications") or [])
              if isinstance(s, dict)}
@@ -954,7 +954,7 @@ def parse_lot_page(html: str, url: str,
         buy_now=_buy_now_amount(details.get("buyNow")
                                 or (bidding.get("live") or {}).get("lot", {}).get("buyNow")),
         # `min`/`max` are per currency and the non-EUR entries hold 0 -- which
-        # means "not provided" and not "free" (§4's null-versus-zero).
+        # means "not provided" and not "free" (null, not zero).
         estimate_min=_number((estimate.get("min") or {}).get("EUR")) or None,
         estimate_max=_number((estimate.get("max") or {}).get("EUR")) or None,
         seller_id=str(seller.get("id")) if seller.get("id") else None,

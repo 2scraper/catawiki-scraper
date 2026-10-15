@@ -54,6 +54,7 @@ from product_parser import (parse_products, detect_bot_challenge,
                             detect_page_state, BOT_CHALLENGE_MARKERS)
 from output_writer import save
 import env_config
+import page_flow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("scraper_api_client")
@@ -220,7 +221,7 @@ def main() -> int:
         rc = _run_once(args, attempt, attempts)
         if rc != 3 or attempt == attempts:
             return rc
-        logger.info("Challenge page on attempt %d/%d — retrying in %ds.",
+        logger.info("Challenge page on attempt %d/%d — retrying in %.0fs.",
                     attempt, attempts, args.retry_delay)
         time.sleep(args.retry_delay)
     return rc
@@ -328,11 +329,11 @@ def parse_args():
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 products were parsed. Off by "
                         "default so a failed fetch can't overwrite a good result.")
-    p.add_argument("--retries", type=int, default=1,
+    p.add_argument("--retries", type=page_flow.non_negative_int, default=1,
                    help="Extra attempts if a bot-challenge page comes back. One retry is "
                         "usually worth it. Each attempt is a separate billable task, so "
                         "this defaults to 1.")
-    p.add_argument("--retry-delay", type=int, default=10,
+    p.add_argument("--retry-delay", type=page_flow.non_negative_float, default=10,
                    help="Seconds between retries (default 10)")
     p.add_argument("--dump-html", default=None,
                    help="Also write the raw returned HTML to this path (always, even on success)")

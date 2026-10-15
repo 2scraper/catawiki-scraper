@@ -84,47 +84,9 @@ jobs:
         # The README links to these two files, so a push without them ships
         # broken links. And a sample invented by hand drifts from the schema and
         # teaches readers the wrong field names, so these are cut from a real
-        # run rather than written by hand.
-        run: |
-          python - <<'EOF'
-          import csv, json, sys
-          from pathlib import Path
-
-          MARKERS = ("sample-product-", "example brand", "sample product",
-                     "product description text", "lorem ipsum")
-
-          fail = []
-          for name in ("sample_output.json", "sample_output.csv"):
-              if not Path(name).is_file():
-                  fail.append(f"{name} is missing — regenerate it from a real run")
-
-          if not fail:
-              rows = json.loads(Path("sample_output.json").read_text())
-              if not rows:
-                  fail.append("sample_output.json is empty")
-              blob = json.dumps(rows).lower()
-              hit = [m for m in MARKERS if m in blob]
-              if hit:
-                  fail.append(f"sample_output.json looks fabricated: {hit}")
-
-              # Column set must match what the writers actually produce.
-              from output_writer import Product
-              from dataclasses import asdict
-              expected = list(asdict(Product()).keys())
-              for i, row in enumerate(rows):
-                  if list(row.keys()) != expected:
-                      fail.append(f"row {i} columns drifted from output_writer.Product")
-                      break
-
-              with open("sample_output.csv", newline="", encoding="utf-8") as f:
-                  header = next(csv.reader(f))
-              if header != expected:
-                  fail.append("sample_output.csv header drifted from output_writer.Product")
-
-          for line in fail:
-              print("FAILED:", line)
-          sys.exit(1 if fail else 0)
-          EOF
+        # run rather than written by hand. ONE implementation, in
+        # ci_checks.py: this step used to carry a narrower inline copy of it.
+        run: python3 .github/ci_checks.py --sample-check
 
       - name: Config reporter runs with no .env present
         run: python env_config.py
@@ -151,11 +113,10 @@ jobs:
         # endpoint, a planted 32-hex key and a planted http proxy URL.
         run: python3 .github/ci_checks.py --secret-check
 
-      - name: The repo's own --help and sample checks agree with this workflow
-        # ci_checks.py implements all three checks. The two above are also
-        # done as workflow steps for the clearer failure output; running them
-        # here as well is what keeps the two from drifting apart again.
-        run: python3 .github/ci_checks.py --help-check --sample-check
+      - name: The repo's own --help check agrees with this workflow
+        # ci_checks.py implements the --help check too. The inline step above
+        # also covers diff_runs.py; running both keeps them from drifting.
+        run: python3 .github/ci_checks.py --help-check
 
   engine-smoke:
     # The offline job above installs NO engine library on purpose (that is what
