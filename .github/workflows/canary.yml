@@ -36,9 +36,9 @@ name: canary
 #
 # That settles how this workflow is shaped:
 #
-#   * It runs DAILY. A canary that can pass without a credential should never
+#   * It runs WEEKLY (Mondays). A canary that can pass without a credential should never
 #     be gated on one -- ungated, the badge going red is the site changing,
-#     retested every morning without anyone remembering to.
+#     retested every Monday without anyone remembering to.
 #   * The local route needs no secret, so there is NO skip path. A skip would
 #     make the badge green on days nothing was tested.
 #   * The Scraping Browser route is kept, but only on request: dispatch with
@@ -58,7 +58,7 @@ name: canary
 #   never through a --cdp-endpoint flag on a command line.
 on:
   schedule:
-    - cron: "23 6 * * *"
+    - cron: "23 6 * * 1"
   workflow_dispatch:
     inputs:
       route:
@@ -202,7 +202,7 @@ jobs:
                 echo "### Canary did NOT test anything (exit 5, endpoint refused)" >> "$GITHUB_STEP_SUMMARY"
                 echo "A 401 in the log means the \`CATAWIKI_CDP_ENDPOINT\` secret is no longer valid: refresh it, or dispatch with route=local." >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "::warning::The page was never obtained (exit 5) on the local xvfb route — a navigation timeout or a browser that did not start, so nothing was tested and this run is not failed. If it repeats daily, read the scrape step's log: that is a runner-side change, not a parser one."
+                echo "::warning::The page was never obtained (exit 5) on the local xvfb route — a navigation timeout or a browser that did not start, so nothing was tested and this run is not failed. If it repeats on later runs, read the scrape step's log: that is a runner-side change, not a parser one."
                 echo "### Canary did NOT test anything (exit 5, page never obtained)" >> "$GITHUB_STEP_SUMMARY"
                 echo "Local route: the scrape step's log names the navigation error." >> "$GITHUB_STEP_SUMMARY"
               fi ;;

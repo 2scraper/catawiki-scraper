@@ -410,7 +410,7 @@ check that no `.env`, test suite or fixture was baked in.
 
 **What the canary badge here means.** The workflow is a real three-page run
 against a real category URL, with a floor on the rows, the reserve invariant,
-page+position uniqueness and a dozen other assertions — and it runs **daily,
+page+position uniqueness and a dozen other assertions — and it runs **weekly (Mondays),
 from a stock GitHub runner, with no secret**. Akamai refuses a headless browser
 here, so the canary runs a real headful Chromium inside a virtual display
 (`xvfb-run`). Its first run that way, on 2026-09-23, fetched 72 lots over 3
