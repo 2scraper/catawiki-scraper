@@ -11,6 +11,10 @@ or an empty column.
 
 ## [Unreleased]
 
+### Changed
+
+- CI only: the canary now runs weekly (Mondays 06:23 UTC) instead of daily, and on a manual dispatch.
+
 ## [0.2.0] — 2026-10-15
 
 > **Behaviour changes.**

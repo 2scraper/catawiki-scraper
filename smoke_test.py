@@ -1258,7 +1258,7 @@ def test_canary_separates_access_from_defect():
     # WHY EACH CODE LANDS WHERE IT DOES:
     #   0  got in and parsed         -> pass, and the assertions then run
     #   3  blocked before parsing    -> ACCESS. Measured intermittent per
-    #      profile on this site, so a daily red badge would be noise.
+    #      profile on this site, so a red badge on every run would be noise.
     #   5  endpoint refused          -> ACCESS, and the commonest cause is an
     #      EXPIRED SECRET. A credential is not forever; failing on it paints
     #      the badge red every day until someone notices.
@@ -1301,15 +1301,15 @@ def test_canary_separates_access_from_defect():
     ok &= check("the reason access is not a defect is written down",
                 "ACCESS CONDITIONS ARE NOT DEFECTS" in wf)
 
-    # A DAILY SCHEDULE, ON A ROUTE THAT NEEDS NO CREDENTIAL. For v0.1.x the
+    # A WEEKLY SCHEDULE, ON A ROUTE THAT NEEDS NO CREDENTIAL. For v0.1.x the
     # canary was dispatch-only around a Scraping Browser secret, and this
     # check pinned "no cron" -- so it ran once
     # (2026-09-11) and never again. Headful Chromium under xvfb on a stock
     # runner was then measured to pass every assertion with no secret at all
-    # (2026-09-23, 72 rows over 3 pages), so the canary runs daily on that
+    # (2026-09-23, 72 rows over 3 pages), so the canary runs weekly on that
     # route and must not be gated on a secret, nor skip when one is absent.
-    ok &= check("the canary has a daily cron schedule",
-                bool(re.search(r"^\s*-\s*cron:\s*\"\d+ \d+ \* \* \*\"", wf, re.M)))
+    ok &= check("the canary has a weekly (Monday) cron schedule",
+                bool(re.search(r"^\s*-\s*cron:\s*\"\d+ \d+ \* \* 1\"", wf, re.M)))
     ok &= check("it is dispatchable by hand", "workflow_dispatch:" in wf)
     ok &= check("a scheduled run takes the local (credential-free) route",
                 "ROUTE: ${{ inputs.route || 'local' }}" in wf)
