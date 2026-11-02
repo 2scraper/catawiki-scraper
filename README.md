@@ -1,4 +1,4 @@
-# catawiki-scraper
+# Catawiki Scraper — Auction Lots, Bids and Estimates in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/catawiki-scraper?sort=semver)](https://github.com/2scraper/catawiki-scraper/releases)
 [![tests](https://github.com/2scraper/catawiki-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/catawiki-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%7C%20Selenium%20%7C%20pyppeteer%20%7C%20CDP-informational)](#engines)
 [![runs without an account](https://img.shields.io/badge/runs%20without-an%20account-brightgreen)](#do-you-need-any-of-the-paid-products)
+
+**Catawiki scraper** — an open-source (MIT) Python tool that reads catawiki.com category listings, search results, whole auctions and single lot pages and writes auction lots — current or final bid, bid count, reserve status, estimate and seller — to JSON or CSV. Measured on 2026-09-10 against `/en/c/333-watches`, the site refused every headless browser whatever the exit address and served a headful one, so the scraper runs headful by default. Use it to build a dataset of lot prices and reserves, or compare two runs with `diff_runs.py`.
 
 Scrapes [Catawiki](https://www.catawiki.com) auction lots — category listings,
 search results, whole auctions and single lot pages — to JSON or CSV, with
@@ -431,6 +433,23 @@ connection, so a canary sharing a pid with a person's run gets
 `profile_locked` and reports a failure that has nothing to do with the site.
 
 ---
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Etsy scraper](https://github.com/2scraper/etsy-scraper) — Search, category, shop and listing pages as JSON or CSV…
+- [Farfetch scraper](https://github.com/2scraper/farfetch-scraper) — Luxury fashion listings and per-size product data…
+- [Givenchy Beauty scraper](https://github.com/2scraper/givenchy-scraper) — Products, prices and shades across 11 storefront locales
+- [Home Depot scraper](https://github.com/2scraper/homedepot-scraper) — Per-store prices, stock, brands, models and ratings…
+- [Indiegogo scraper](https://github.com/2scraper/indiegogo-scraper) — Project listings, campaign pages and reward tiers
+- [Kohl's scraper](https://github.com/2scraper/kohls-scraper) — Prices, price ranges, sale and clearance labels, ratings…
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
 
 ## Contributing, security, licence
 
