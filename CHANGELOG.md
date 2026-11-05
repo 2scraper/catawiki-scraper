@@ -17,6 +17,7 @@ or an empty column.
 
 ### Changed
 
+- CI only: the scheduled canary now starts at 06:27 UTC (Mondays) instead of 06:23, so canaries that share one Scraping Browser profile no longer start at the same time and lock each other out.
 - CI only: the canary now runs weekly (Mondays 06:23 UTC) instead of daily, and on a manual dispatch.
 
 ## [0.2.0] — 2026-10-15

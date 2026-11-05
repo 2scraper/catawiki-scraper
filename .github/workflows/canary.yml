@@ -58,7 +58,7 @@ name: canary
 #   never through a --cdp-endpoint flag on a command line.
 on:
   schedule:
-    - cron: "23 6 * * 1"
+    - cron: "27 6 * * 1"
   workflow_dispatch:
     inputs:
       route:
