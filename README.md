@@ -37,7 +37,9 @@ Anything not measured is not claimed.
 | Scraping Browser API over CDP | residential NL | **200**, 637 KB, 24 lots |
 
 Read it by column, not by row: the exit address changes nothing and the
-headless flag changes everything. So:
+headless flag changes everything. The "datacentre-classified" rows are refused
+because of the **client** (`curl`, a headless browser), not the address: the
+same address with a headful browser is served. So:
 
 * **`--headful` is the default here.** A `--headless` default would be a scraper whose default cannot
   fetch the site.
@@ -276,6 +278,23 @@ identical columns (2026-09-11).
 **No.** A local headful Chrome on an ordinary connection returned 24 of 24
 lots with full price coverage, with no key, no proxy and no account
 (2026-09-10). Start there.
+
+Rechecked 2026-11-05 from a datacentre address (Hetzner, Finland), no key, no
+proxy, Playwright headful under `xvfb-run`, one request per route:
+
+| Route | Mode | Headful, no proxy | Headless, same address |
+|---|---|---|---|
+| Category listing `/en/c/333-watches` | `listing` | **served**, 24 of 24 lots priced | **refused**, 403, 308 bytes (exit 3) |
+| Auctions index `/en/a` | `auctions` | **served**, 24 auctions | not tested |
+| One auction `/en/a/{id}-{slug}` | `listing` | **served**, 350 lots (an auction closing that day; 59 still showed a bid) | not tested |
+| One lot `/en/l/{id}-{slug}` | `lot` | **served**, 1 lot | not tested |
+
+No route needed a paid product. What the site gates is the client: headless
+was refused on the listing and a plain HTTP client (`curl`) got 403 on it from
+the same address the same day, so run every route with a browser **with a
+window** (a desktop session or `xvfb-run`). Where no display is available, the
+Scraping Browser API below is the remote alternative (verified 2026-09 on all
+three modes).
 
 What the four separately billed [2Captcha](https://2captcha.com) products
 actually buy on this site:

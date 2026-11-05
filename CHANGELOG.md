@@ -11,6 +11,10 @@ or an empty column.
 
 ## [Unreleased]
 
+### Documentation
+
+- README: states per route (category listing, auctions index, one auction, one lot) what access each needs, rechecked 2026-11-05 from a datacentre address. The 403 shown for a datacentre address is a refusal of the client (`curl`, headless), not of the address: a headful browser from that address is served with no key or proxy.
+
 ### Changed
 
 - CI only: the canary now runs weekly (Mondays 06:23 UTC) instead of daily, and on a manual dispatch.
