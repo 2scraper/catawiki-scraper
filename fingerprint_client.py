@@ -92,6 +92,34 @@ _KEY_IN_TEXT_RE = re.compile(
     r"((?:client)?key|token|api[_-]?key)=([^&\s'\"]{6,})", re.IGNORECASE)
 
 
+class FingerprintError(RuntimeError):
+    """The Fingerprint API (or the request to it) failed.
+
+    A RuntimeError subclass so existing handlers still catch it, and a type of
+    its own so an engine can turn it into one clean line and an exit code
+    instead of a traceback.
+    """
+
+
+def _service_detail(resp) -> str:
+    """What the service itself said about a failure, redacted, or ''.
+
+    The service answers with a readable reason (for example that the account
+    has no fingerprint plan) in the body's `errorDescription`; reporting only
+    the status code threw that away and left the user guessing.
+    """
+    try:
+        body = resp.json()
+        detail = ""
+        if isinstance(body, dict):
+            detail = (body.get("errorDescription") or body.get("message")
+                      or body.get("error") or "")
+        detail = detail or resp.text[:200]
+    except ValueError:
+        detail = resp.text[:200]
+    return _redact(str(detail).strip())
+
+
 def _redact(text) -> str:
     return _KEY_IN_TEXT_RE.sub(r"\1=***", str(text))
 
@@ -151,12 +179,15 @@ def get_fingerprint(api_key: str, *, tags: Optional[str] = None,
     except requests.RequestException as exc:
         # The key is a query parameter on this endpoint, so the URL inside a
         # connection error carries it. Re-raised redacted.
-        raise RuntimeError("Fingerprint API request failed: %s" % _redact(exc)) from None
+        raise FingerprintError("Fingerprint API request failed: %s" % _redact(exc)) from None
 
     if resp.status_code == 401:
-        raise RuntimeError("Fingerprint API rejected the key (401). Note this is a "
-                           "separate subscription from captcha solving — a working "
-                           "solver key is not automatically enabled for fingerprints.")
+        said = _service_detail(resp)
+        raise FingerprintError(
+            "Fingerprint API rejected the key (401)%s. Note this is a "
+            "separate subscription from captcha solving — a working "
+            "solver key is not automatically enabled for fingerprints."
+            % (": " + said if said else ""))
     if resp.status_code == 400:
         # Say what the API said, and name the overwhelmingly likely cause.
         # `tags` takes ONE OS-family value; a list — which the plural name and
@@ -171,18 +202,21 @@ def get_fingerprint(api_key: str, *, tags: Optional[str] = None,
             hint = (" — `tags` takes ONE OS-family value (Windows, "
                     "Microsoft Windows, Android), not a list; you passed %r"
                     % tags)
-        raise RuntimeError("Fingerprint API rejected the request (400): %s%s"
-                           % (_redact(detail), hint))
+        raise FingerprintError("Fingerprint API rejected the request (400): %s%s"
+                               % (_redact(detail), hint))
     if resp.status_code == 429:
-        raise RuntimeError("Fingerprint API rate limit hit (429). The per-minute cap "
-                           "depends on your plan (30/100/300/unlimited). Cache the "
-                           "result instead of fetching per request.")
+        raise FingerprintError("Fingerprint API rate limit hit (429). The per-minute cap "
+                               "depends on your plan (30/100/300/unlimited). Cache the "
+                               "result instead of fetching per request.")
     try:
         resp.raise_for_status()
     except requests.HTTPError as exc:
-        # requests puts resp.url — including `key=...` — into this message.
-        raise RuntimeError("Fingerprint API returned %s: %s"
-                           % (resp.status_code, _redact(exc))) from None
+        # requests puts resp.url — including `key=...` — into this message, so
+        # the service's own words are used instead of the exception text.
+        said = _service_detail(resp)
+        raise FingerprintError("Fingerprint API returned %s%s"
+                               % (resp.status_code,
+                                  ": " + said if said else " (no reason given)")) from None
     fp = resp.json()
 
     if cache_dir:

@@ -282,6 +282,20 @@ def category_from_url(url: str) -> Optional[str]:
     return f"{match.group('id')}-{slug}" if slug else match.group("id")
 
 
+def search_query_from_url(url: str) -> Optional[str]:
+    """The query a /s search URL carries, or None.
+
+    The `category` column is documented as defaulting to the search query for a
+    search run, so a search row reads as "rolex" rather than as an empty cell.
+    """
+    if listing_kind(url) != "search":
+        return None
+    for key, value in parse_qsl(urlsplit(url).query):
+        if key == "q" and value.strip():
+            return value.strip()
+    return None
+
+
 def sku_from_url(url: str) -> Optional[str]:
     """The lot id from a lot URL. The site's own id, not a derived one."""
     match = _LOT_PATH_RE.match(urlsplit(url).path)
@@ -291,6 +305,42 @@ def sku_from_url(url: str) -> Optional[str]:
 def auction_id_from_url(url: str) -> Optional[str]:
     match = _AUCTION_PATH_RE.match(urlsplit(url).path)
     return match.group("id") if match else None
+
+
+_IMAGE_KEYS = ("large", "originalUrl", "url", "medium", "id", "thumbnail")
+
+
+def _first_image_url(image: dict) -> Optional[str]:
+    """The largest address an image object carries, or None."""
+    for key in _IMAGE_KEYS:
+        value = image.get(key)
+        if isinstance(value, str) and value.startswith("http"):
+            return value
+    return None
+
+
+def listing_identity(url: str):
+    """What a listing URL IS, for telling two runs of one listing from two
+    different listings: (kind, key), or None when the URL says nothing.
+
+    A category is its numeric id (the slug and the locale are spelling), a
+    search is its query, an auction is its id. The page number and tracking
+    parameters are not part of it: page 5 of a category is still that category.
+    """
+    kind = listing_kind(url)
+    if kind == "category":
+        match = _CATEGORY_PATH_RE.match(urlsplit(url).path)
+        return ("category", match.group("id")) if match else None
+    if kind == "search":
+        query = search_query_from_url(url)
+        return ("search", query.lower()) if query else ("search", "")
+    if kind == "auction":
+        auction = auction_id_from_url(url)
+        return ("auction", auction) if auction else None
+    if kind == "lot":
+        lot = sku_from_url(url)
+        return ("lot", lot) if lot else None
+    return (kind, "") if kind else None
 
 
 def _lot_id_from_href(href: str) -> Optional[int]:
@@ -601,7 +651,41 @@ def served_by_catawiki(html: str) -> bool:
     `<title>www.catawiki.com</title>`, so a title check calls it a real page,
     and it holds no vendor marker of any kind.
     """
-    return len(_ASSET_MARKER.findall(html or "")) >= _ASSET_MIN_MATCHES
+    html = html or ""
+    if len(_ASSET_MARKER.findall(html)) >= _ASSET_MIN_MATCHES:
+        return True
+    # A page the site really built can be too SMALL to reference its asset
+    # host twice: the "Page Not Found" page held none (0 matches in 84 KB) and
+    # a search's "No results" page held one. What neither refusal carries is
+    # the Next.js envelope the site's own app writes into every page, so the
+    # envelope is the second positive signal. Akamai's 394-byte "Access Denied"
+    # and Chromium's network-error page have no `__NEXT_DATA__` at all.
+    envelope = _next_data_envelope(html)
+    return bool(envelope and envelope.get("buildId")
+                and isinstance(envelope.get("page"), str))
+
+
+def _next_data_envelope(html: str) -> Optional[dict]:
+    """The whole `__NEXT_DATA__` object (not only pageProps), or None."""
+    match = _NEXT_DATA_RE.search(html or "")
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def is_not_found(html: str) -> bool:
+    """Whether the site answered "this page does not exist".
+
+    Its own 404 is a normal page (HTTP 200 behind the app shell) whose route
+    is `/404`. That is an answer about the address, not a refusal of the
+    client: a lot that was withdrawn or never existed must not read as a block.
+    """
+    envelope = _next_data_envelope(html)
+    return bool(envelope and envelope.get("page") in ("/404", "/_error"))
 
 
 def detect_block_marker(html: str) -> Optional[str]:
@@ -665,8 +749,17 @@ def detect_page_state(html: str, status: Optional[int] = None,
     if props and (props.get("lotDetailsData") or props.get("auction")):
         return "content"
 
+    # 1b. Its own "page not found": an answer about the address, not a refusal.
+    if is_not_found(html):
+        return "empty"
+
     # 2. Its own empty answer, stated by the payload rather than by a phrase.
     if key and payload.get("total") == 0:
+        return "empty"
+    # A listing payload that is present and carries an empty `lots` list is the
+    # site saying "nothing on this page" (a search's page 2, or a page past the
+    # end), not a grid that is still painting.
+    if key and payload.get("lots") == []:
         return "empty"
 
     # 3. A challenge it rendered on purpose.
@@ -782,7 +875,8 @@ def parse_products(html: str, url: str, page: int = 1,
             price=price,
             currency=CURRENCY if price is not None else None,
             image_url=lot.get("originalImageUrl") or lot.get("thumbImageUrl") or None,
-            category=category or category_from_url(url),
+            category=(category or category_from_url(url)
+                      or search_query_from_url(url)),
             # Provenance, and on this site it is doing real work: the amount
             # comes from the DOM and everything else from the payload, so a
             # row whose card had not hydrated is `next_data` and is missing
@@ -846,7 +940,7 @@ def _dom_only_rows(soup: BeautifulSoup, url: str, page: int,
             title=_clean(title_node.get_text(" ", strip=True)) or None if title_node else None,
             price=price,
             currency=CURRENCY if price is not None else None,
-            category=category_from_url(url),
+            category=category_from_url(url) or search_query_from_url(url),
             price_source="dom",
             page=page,
             position=position_offset + index,
@@ -911,7 +1005,10 @@ def parse_lot_page(html: str, url: str,
              if isinstance(s, dict)}
     seller = details.get("sellerInfo") or {}
     score = (seller.get("score") or {}) if isinstance(seller.get("score"), dict) else {}
-    images = [i.get("url") or i.get("originalUrl")
+    # The lot payload names its image sizes `large`, `medium` and `thumbnail`
+    # (and repeats the full-size address as `id`); `url`/`originalUrl` are the
+    # LISTING card's spelling. Largest first, so the column is the full image.
+    images = [_first_image_url(i)
               for i in (details.get("images") or []) if isinstance(i, dict)]
 
     return Product(

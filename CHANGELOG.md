@@ -11,6 +11,29 @@ or an empty column.
 
 ## [Unreleased]
 
+### Fixed
+
+Found by a third-party audit on 2026-11-10 and reproduced against `main` the same day; each fix below was re-run live afterwards.
+
+- **A run asking for more than 100 pages no longer loses everything.** It used to plan page 101, get no address for it, crash and write nothing. It now stops at the site's cap, keeps what it gathered and records `pages_capped_by_site` and `pages_requested_by_user` in the sidecar.
+- **A run that starts deep in a listing no longer fetches the wrong pages.** `--pages 3` from `?page=99` fetched 99, 100 and then page **3**, and reported success. Every address, the cap and the `page` column now use the site's own page number. A start page past 100 is a usage error (exit 2).
+- **"Nothing found" and "Page Not Found" are no longer read as a block.** A search that matched nothing stops after page 1, and a withdrawn lot exits 4 instead of 3 with advice to buy a Scraping Browser. A page the site built but that is too small to name its asset host twice is now recognised by its own `__NEXT_DATA__` envelope; Akamai's refusal and Chromium's error page still read as blocked.
+- **An empty page inside the listing's stated size no longer ends the run as complete.** It is fetched once more; if it is empty again the run stops with `stop_reason: listing_ended_early`, `status: partial` and exit 6.
+- **`--mode lot` fills `image_url`.** The lot payload names its sizes `large`/`medium`/`thumbnail`; the code read the listing card's `url`/`originalUrl`.
+- **`--proxy-block-retries` now rotates away from a dead exit** (refused connection, rejected tunnel, bad credentials) in all three engines. It still does not retry a site refusal, which is decided by the client, not the address. "Gave up after N attempts" now counts the attempts made.
+- **A Scraping Browser profile still held by the previous run is retried** (four tries, ten seconds apart, with the reason in the log) instead of failing every second back-to-back run with a bare HTTP 500. pyppeteer now ends that case as one masked line and exit 5, as Playwright does, instead of a 30-second hang, two tracebacks and exit 1.
+- **The Docker image builds and fetches.** Playwright 1.65's driver needs `libatomic1`, which `python:3.12-slim` lacks, so the build died before installing a browser. The image now also carries `xvfb` and `tini` and runs the scraper under `xvfb-run`: the site refuses a headless browser and a headful one needs a display. No `docker run --init` is needed.
+- **`diff_runs.py` refuses two runs of different listings** (a category against a search) using the `start_url` in each sidecar, and no longer advises re-running "the incomplete side" when both are complete. The README example now uses `--old`/`--new`.
+- **Search rows carry their query in `category`**, as the help says.
+- **`--mode auctions` refuses a URL that is not the auctions index.**
+- **An unwritable `--out` folder and a missing `--proxy-file` are usage errors (exit 2)** raised before any browser starts, not a traceback after a whole run.
+- **An empty search that ran to its end writes `status: complete`** (with `products: 0`) when `--allow-empty` is given; it used to write `failed` beside `stop_reason: completed`.
+- **Selenium with a credentialed proxy is refused before it starts (exit 2)**; it used to run unauthenticated and end as "blocked" (exit 3).
+- **The Fingerprint API's own reason reaches the user** for any non-success status, and a failure ends as one line and exit 5 instead of a traceback.
+- **The Scraper API client reads a lot page and an auctions index** (`--mode lot`/`auctions`), accepts `--twocaptcha-key` and `--cdp-endpoint` like the browser engines, and its `--help` no longer says it needs `--cdp-url` to reach the site or returns about 5 products.
+- `--min-score` accepts only 0.3, 0.7 or 0.9; the default `--locale` is `nl-NL` (it was `id-ID`); the `--solve-captcha` and `--proxy-block-retries` help texts now agree with the README; the README says `--concurrency` with a Scraping Browser is ignored with a warning, as it is.
+- `sample_output.json`/`.csv` were retaken on 2026-11-10 with the current version: a filled `time_left_text` on the listing rows and an `image_url` on the lot rows.
+
 ### Documentation
 
 - README: states per route (category listing, auctions index, one auction, one lot) what access each needs, rechecked 2026-11-05 from a datacentre address. The 403 shown for a datacentre address is a refusal of the client (`curl`, headless), not of the address: a headful browser from that address is served with no key or proxy.

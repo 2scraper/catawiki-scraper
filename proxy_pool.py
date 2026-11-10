@@ -104,11 +104,15 @@ def parse_proxy_line(line: str, source: str = "<arg>") -> Optional[str]:
 def load_proxy_file(path: str) -> List[str]:
     """Read a proxy-per-line file. Blank lines and `#` comments are skipped."""
     proxies = []
-    with open(path, "r", encoding="utf-8") as f:
-        for lineno, raw in enumerate(f, 1):
-            entry = parse_proxy_line(raw, source=f"{path}:{lineno}")
-            if entry:
-                proxies.append(entry)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for lineno, raw in enumerate(f, 1):
+                entry = parse_proxy_line(raw, source=f"{path}:{lineno}")
+                if entry:
+                    proxies.append(entry)
+    except OSError as e:
+        raise ProxyError(f"--proxy-file {path!r} cannot be read: "
+                         f"{e.strerror or e}") from None
     if not proxies:
         raise ProxyError(f"{path}: no proxy entries found (only blanks/comments?)")
     return proxies

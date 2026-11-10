@@ -230,9 +230,14 @@ def apply(args, keys=None, quiet=False):
 
     mapping = keys or ENV_KEYS
     typed = _dests_given_on_argv(set(mapping.values()))
+    # An explicit pool outranks a single proxy that only came from .env, so the
+    # run must not then complain that "--proxy" was given alongside it.
+    pool_typed = bool(_dests_given_on_argv({"proxy_file"}))
 
     for env_name, dest in mapping.items():
         if not hasattr(args, dest):
+            continue
+        if dest == "proxy" and pool_typed and dest not in typed:
             continue
         if dest in typed:
             if not quiet and env_value(env_name):

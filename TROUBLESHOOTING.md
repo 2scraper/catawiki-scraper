@@ -141,8 +141,12 @@ at whether the payload is in the file at all.
 ## `500 Internal Server Error` on connecting, exit 5, `profile_locked`
 
 A Scraping Browser profile allows **one live connection**. Another run still
-holds that `pid` — wait for it, or use a different `pid`. `--concurrency`
-above 1 is refused with `--cdp-endpoint` for the same reason.
+holds that `pid` — wait for it, or use a different `pid`. A run started right
+after another has closed can reach the endpoint before the profile is
+released, so the connect is retried four times, ten seconds apart, and the log
+says the profile is probably still held. If all four fail, another run really
+does hold it. `--concurrency` above 1 is ignored with `--cdp-endpoint`, with a
+warning, for the same reason.
 
 ---
 

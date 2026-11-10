@@ -16,8 +16,10 @@ discovered:
   chromedriver's `debuggerAddress` takes a bare `host:port` with nowhere to
   put a password. A credentialled `--cdp-endpoint` is refused here with that
   explanation rather than silently dropping the credentials.
-* **`--proxy-server` cannot authenticate at all.** Credentials are stripped
-  and a warning printed. The way round it on this site is 2Captcha's
+* **`--proxy-server` cannot authenticate at all.** A proxy that carries
+  credentials is refused before the browser starts (exit 2), like a
+  credentialled `--cdp-endpoint`, instead of running unauthenticated and
+  ending as a "blocked" exit 3. The way round it on this site is 2Captcha's
   IP-whitelist mode, which hands out `host:port` connections with no
   credentials in them — those work here exactly as they do in the other two
   engines, and one was used for this engine's live run.
@@ -120,6 +122,8 @@ class PageOutcome:
     # Populated here: the SSR payload states `total` and `lotsPerPage` on
     # page 1, which is what makes the page count arithmetic.
     total_available: Optional[int] = None
+    # Pages the listing's own payload states (see playwright_scraper.PageOutcome).
+    listing_pages: Optional[int] = None
     # The query a search page ran, read from its payload, for the sidecar.
     header: Optional[str] = None
 
@@ -225,14 +229,21 @@ class _Session:
             options.add_argument(f"--proxy-server={scrubbed}")
             logger.info("Using proxy exit %s", mask(self.pool.current))
             if credentials:
-                logger.warning(
-                    "This proxy has credentials and SELENIUM CANNOT SEND "
+                # Refused up front, like a credentialed --cdp-endpoint. The
+                # run used to go on with the credentials stripped, the exit
+                # answered 407 or an error page, and the run ended as exit 3
+                # ("blocked") - a verdict about the SITE for a fault that is
+                # this engine's, which sent a pipeline looking for another
+                # address when no address could have worked.
+                logger.error(
+                    "This proxy has credentials (%s) and SELENIUM CANNOT SEND "
                     "THEM: --proxy-server accepts an address only, and there "
                     "is no Selenium equivalent of pyppeteer's "
-                    "page.authenticate. They have been stripped, so requests "
-                    "will go out unauthenticated and the exit will most "
-                    "likely refuse them. Use playwright_scraper.py or "
-                    "puppeteer_scraper.py for an authenticated proxy.")
+                    "page.authenticate. Use playwright_scraper.py or "
+                    "puppeteer_scraper.py for an authenticated proxy, or "
+                    "whitelist your address and pass the proxy without "
+                    "credentials.", mask(self.pool.current))
+                sys.exit(2)
 
         self.driver = webdriver.Chrome(options=options)
         self._apply_timeouts()
@@ -350,8 +361,9 @@ def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
         row = parse_lot_page(html, url, category=args.category)
         return [row] if row is not None else []
     if args.mode == "auctions":
-        return auction_rows(html, url, page=page_num)
-    return parse_products(html, url, page=page_num, category=args.category)
+        return auction_rows(html, url, page=page_flow.site_page(args.url, page_num))
+    return parse_products(html, url, page=page_flow.site_page(args.url, page_num),
+                          category=args.category)
 
 
 def _same_url(a: str, b: str) -> bool:
@@ -487,11 +499,17 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
     budget = page_flow.SolveBudget(page_flow.SOLVES_PER_PAGE)
+    # A DEAD exit has its own rotation budget: a refusal here is decided by
+    # the client, so `block_retries` is 0, but an exit that cannot be reached
+    # is exactly what another address fixes (see playwright_scraper).
+    exit_retries = args.proxy_block_retries if has_pool else 0
+    attempts_made = 0
 
-    for block_attempt in range(block_retries + 1):
+    for block_attempt in range(max(block_retries, exit_retries) + 1):
         logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
         load_failed, exit_failed = False, None
         for attempt in range(1, args.retries + 1):
+            attempts_made = attempt
             try:
                 session.driver.get(url)
                 load_failed = False
@@ -510,10 +528,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                    args.retries, text[:120], pause)
                     time.sleep(pause)
 
-        if exit_failed and has_pool and block_attempt < block_retries:
+        if exit_failed and has_pool and block_attempt < exit_retries:
             logger.warning("Exit %s is unusable (%s) — rotating to another "
                            "one (%d/%d).", mask(pool.current), exit_failed,
-                           block_attempt + 1, block_retries)
+                           block_attempt + 1, exit_retries)
             pool.advance(f"unusable exit: {exit_failed}")
             session.relaunch()
             d = _driver(session)
@@ -604,9 +622,12 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                page_num, state, pause, block_attempt + 1,
                                block_retries)
                 time.sleep(pause)
+        else:
+            break
 
     if load_failed:
-        logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
+        logger.error("Gave up loading %s after %d attempt(s).", url,
+                     attempts_made or args.retries)
         outcome.load_failed = True
         return outcome
 
@@ -734,6 +755,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # The payload states the listing's own total, so the arithmetic
         # completeness check is available here and the number is recorded
         # rather than guessed.
+        outcome.listing_pages = total_pages(html)
         outcome.total_available = total_results(html)
         outcome.header = search_header(html)
         if outcome.header:
@@ -811,13 +833,20 @@ def scrape(args) -> int:
             stop_reason = ("page_load_timeout" if first.load_failed
                            else f"blocked_{first.blocked_by}")
             blocked = first.blocked_by is not None
+        elif (args.mode == "listing" and first.state == "empty"
+              and not first.products):
+            # The site's own "nothing here": its page 2 is not a further
+            # answer, and asking for it turned a correct empty result into
+            # "blocked".
+            logger.info("Page 1 is the site's own empty answer — there is "
+                        "nothing further to page through.")
         elif args.mode == "listing":
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
 
             planned = None
             if args.pages > 1:
                 page_one = first.final_url or args.url
-                constructed = page_url(page_one, 2)
+                constructed = page_url(page_one, page_flow.site_page(args.url, 2))
                 candidates = _next_page_candidates(session, 1)
                 if candidates and not page_flow.pagination_agrees(
                         page_one, 1, candidates):
@@ -833,20 +862,30 @@ def scrape(args) -> int:
                             "on this site: it publishes no rel=next "
                             "anywhere, and ?page=N addresses every page "
                             "correctly.")
-                    planned = [page_url(page_one, n)
-                               for n in range(2, args.pages + 1)]
+                    planned = page_flow.planned_urls(page_one, args.url,
+                                                     args.pages)
 
             first_candidates = _next_page_candidates(session, 1)
             url = (planned[0] if planned else
                    (first_candidates[0] if first_candidates
-                    else page_url(session.driver.current_url, 2)))
+                    else page_flow.next_url(args.url, session.driver.current_url, 1)))
             for page_num in range(2, args.pages + 1):
                 if pool and pool.rotates_per_page():
                     pool.advance(f"per-page rotation, page {page_num}")
                     session.relaunch()
 
                 outcome = _fetch_one_page(session, args, pool, page_num, url)
+                outcome, rechecked = page_flow.recheck_early_empty(
+                    args, page_num, outcome, first.listing_pages,
+                    lambda: _fetch_one_page(session, args, pool, page_num, url))
                 outcomes.append(outcome)
+                if rechecked and outcome.ok and not outcome.products:
+                    stop_reason = "listing_ended_early"
+                    logger.warning("Page %d was empty twice although the "
+                                   "listing states %s page(s): the run is "
+                                   "reported as partial, not complete.",
+                                   page_num, first.listing_pages)
+                    break
                 if not outcome.ok:
                     stop_reason = ("page_load_timeout" if outcome.load_failed
                                    else f"blocked_{outcome.blocked_by}")
@@ -868,7 +907,7 @@ def scrape(args) -> int:
                     nxt = _next_page_candidates(session, page_num)
                     url = (planned[page_num - 1] if planned else
                            (nxt[0] if nxt else
-                            page_url(session.driver.current_url, page_num + 1)))
+                            page_flow.next_url(args.url, session.driver.current_url, page_num)))
                     time.sleep(args.delay)
     finally:
         if session is not None:
@@ -944,10 +983,11 @@ def scrape(args) -> int:
 
     # One-per-run context, in the sidecar rather than repeated down a column:
     # for a search listing, the query the site says it ran.
-    extra = None
+    extra = page_flow.run_extra(args)
     headers = {o.page_num: o.header for o in outcomes if o.header}
     if headers:
-        extra = {"result_header": headers}
+        extra["result_header"] = headers
+    extra = extra or None
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
@@ -988,7 +1028,16 @@ def parse_args():
                         "Wins over --proxy.")
     p.add_argument("--proxy-rotate", choices=list(ROTATE_MODES), default="per-run")
     p.add_argument("--proxy-shuffle", action="store_true")
-    p.add_argument("--proxy-block-retries", type=page_flow.non_negative_int, default=2)
+    p.add_argument("--proxy-block-retries", type=page_flow.non_negative_int, default=2,
+                   help="When an exit is UNREACHABLE (connection refused, tunnel "
+                        "rejected, proxy credentials refused), retry the page "
+                        "from this many OTHER exits of the pool before giving up "
+                        "(default 2; needs a pool of more than one, ignored "
+                        "otherwise). It does not retry a site refusal: on this "
+                        "site a refusal is decided by the client (a headless "
+                        "browser is refused from every address, a headful one "
+                        "is served from the same ones), so another exit would "
+                        "not help and none is tried.")
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 rows were found.")
@@ -1017,12 +1066,15 @@ def parse_args():
                    default="when-blocked",
                    help="when-blocked (default): only pay to solve a "
                         "reCAPTCHA if the content is not already readable. "
-                        "always: solve whenever one is detected. Note that "
-                        "NO challenge has ever been observed on this site — a "
-                        "refused request gets no page at all — so neither "
-                        "setting has anything to act on today, and neither "
-                        "helps with a refusal.")
-    p.add_argument("--min-score", type=float, default=0.7)
+                        "always: solve whenever one is detected. Neither "
+                        "setting touches this site's refusal, which is not a "
+                        "challenge at all: a refused client gets an HTTP 403 "
+                        "\"Access Denied\" page of a few hundred bytes (or "
+                        "nothing), so no solve helps there and none is "
+                        "attempted or billed. No challenge has been seen on "
+                        "this site to an anonymous visitor.")
+    p.add_argument("--min-score", type=float, default=0.7, choices=(0.3, 0.7, 0.9),
+                   help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or 0.9).")
     p.add_argument("--cdp-endpoint", default=None,
                    help="Attach to a running browser at host:port. Must NOT "
                         "carry credentials — chromedriver's debuggerAddress "
@@ -1070,10 +1122,12 @@ def parse_args():
     mismatch = page_flow.mode_url_mismatch(args.mode, args.url, kind)
     if mismatch:
         p.error(mismatch)
+    page_flow.finalize_args(args, p)
     return args
 
 
 if __name__ == "__main__":
+    from fingerprint_client import FingerprintError
     args = parse_args()
     if args.fingerprint and not args.twocaptcha_key:
         logger.error("--fingerprint needs --twocaptcha-key.")
@@ -1083,6 +1137,12 @@ if __name__ == "__main__":
                        "remote browser supplies its own.")
     try:
         sys.exit(scrape(args))
+    except FingerprintError as e:
+        # The service refused (no plan, bad key, rate limit) or could not be
+        # reached: the REMOTE API's answer, so exit 5 with its own reason in
+        # one line, not a traceback and not exit 1 ("a crash in this code").
+        logger.error("%s", e)
+        sys.exit(EXIT_API_ERROR)
     except ProxyError as e:
         logger.error("%s", e)
         sys.exit(2)

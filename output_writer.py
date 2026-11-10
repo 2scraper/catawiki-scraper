@@ -603,8 +603,15 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     wrote_output = bool(rows) or allow_empty
 
     if wrote_output:
-        status = "complete" if (rows and complete) else (
-            "partial" if rows else "failed")
+        # No rows is a FAILURE only when the run did not finish. A search that
+        # matched nothing and ran to its end is a complete run with zero
+        # products; calling it "failed" beside `stop_reason: completed`
+        # contradicted itself and told a pipeline to treat a correct answer
+        # as a fault.
+        if complete:
+            status = "complete"
+        else:
+            status = "partial" if rows else "failed"
         write_run_meta(out_prefix, run_meta(
             status=status, stop_reason=stop_reason,
             pages_requested=pages_requested, pages_completed=pages_completed,

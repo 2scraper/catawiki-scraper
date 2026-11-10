@@ -233,11 +233,28 @@ lots. This scraper caps page planning at 100, on both the URL it builds and
 any link the site offers, and reports how many pages the catalogue has beyond
 the cap.
 
+**A run counts pages from where its URL starts.** `--pages 3` on a URL that
+carries `?page=99` fetches site pages 99 and 100 and stops: it never asks for a
+page the site will not address, keeps what it gathered, and records
+`pages_capped_by_site: true` and `pages_requested_by_user` in the sidecar. The
+`page` column holds the site's own page number (99, 100), not the run's
+count. A start page past 100 is a usage error (exit 2), because the site would
+answer it with page 100's lots.
+
+A page that comes back empty although the listing's own count says it exists is
+fetched once more. If it is empty again the run stops with `stop_reason`
+`listing_ended_early`, `status: partial` and exit 6, rather than calling a
+glitch the end of the listing and reporting a complete run.
+
 A search that matches nothing is a related trap: HTTP 200, the words "No
 results", **and 24 suggested lots** reported as `total: 24`. That state is
 detected from the payload's own `extended_search_result` flag and is **not
 parsed** — writing two dozen plausible rows for a query that matched nothing
-is worse than writing none.
+is worse than writing none. A search with no matches stops at page 1 (page 2
+of it is not a further answer) and ends as exit 4; with `--allow-empty` it
+writes a sidecar with `status: complete` and `products: 0`. The site's own "Page
+Not Found" for a withdrawn lot is read the same way: an answer about the
+address, exit 4, not a block.
 
 ---
 
@@ -262,9 +279,11 @@ identical columns (2026-09-11).
   `ws://user:pass@host:port` and authenticate on the WebSocket upgrade;
   chromedriver's `debuggerAddress` takes a bare `host:port` with nowhere to
   put a password. It is not a generic "connect to CDP" option.
-* **Selenium's `--proxy-server` cannot authenticate at all.** Credentials are
-  stripped and a warning is printed. See the whitelist recipe below, which
-  makes a proxy work in Selenium anyway.
+* **Selenium's `--proxy-server` cannot authenticate at all.** A proxy with
+  credentials is refused before a browser starts (exit 2), the same as a
+  credentialed `--cdp-endpoint`; it used to run unauthenticated and end as
+  "blocked". See the whitelist recipe below, which makes a proxy work in
+  Selenium anyway.
 * **pyppeteer is effectively unmaintained** and its own README points at
   Playwright. It is here for parity, not because it is a good idea.
 * Credentials never reach a command line or a log in any engine — including
@@ -303,8 +322,11 @@ actually buy on this site:
   run no browser infrastructure and get an exit in a country you choose.
   Verified: 200 and the full catalogue from a residential Dutch exit, on
   `--mode listing`, `--mode lot` and `--mode auctions`. One live connection
-  per `pid`, so `--concurrency` above 1 is refused with that reason; use
-  several pids.
+  per `pid`, so `--concurrency` above 1 is ignored with a warning that says
+  why; use several pids. Starting a run right after another has closed can meet
+  the previous connection still releasing the profile (HTTP 500); the connect
+  is retried four times, ten seconds apart, and the log says the profile is
+  probably still held.
 * **Proxies** (`--proxy`, `--proxy-file`) — volume from many addresses. They
   do **not** get a headless browser in.
 * **Captcha solving** (`--solve-captcha`, default `when-blocked`) — nothing
@@ -386,7 +408,7 @@ card count, which would be satisfied instantly while every price is blank.
   in a "similar lots" carousel using the same class a listing uses for its own
   price, so "the first euro amount on the page" is a neighbour's number.
 * **`?page=2` on a lot or auction page does nothing** — neither has a second
-  page. `--concurrency` above 1 is refused there with that reason.
+  page. `--concurrency` above 1 is ignored there, with a warning that says why.
 * **A `profile_locked` error from `--cdp-endpoint`** means another run still
   holds that `pid`. One live connection per profile.
 * An **empty price node containing a zero-width space** is the site's own
@@ -398,12 +420,14 @@ card count, which would be satisfied instantly while every price is blank.
 ## Diffing two runs
 
 ```bash
-python3 diff_runs.py old.json new.json
+python3 diff_runs.py --old old.json --new new.json
 ```
 
 Compares by `sku` and refuses to compare runs that are not both `complete`,
 because a partial run's un-fetched pages otherwise read as delisted lots. It
-also refuses to compare two different `--mode` runs.
+also refuses to compare two different `--mode` runs, and two runs gathered from
+different listings (a category against a search, say): each sidecar records the
+`start_url`, and two catalogues would otherwise read as every lot removed.
 
 On an auction site, expect most differences between two runs to be auctions
 running rather than data changing: a lot's `bid_kind` moving `current` →
@@ -426,8 +450,11 @@ payload carries a per-bidder token, and an auction card names the human who
 curated it.
 
 CI runs the offline suite on the oldest and newest supported Python, and builds
-**and runs** the Docker image — its entrypoint, a real Chromium launch, and a
-check that no `.env`, test suite or fixture was baked in.
+the Docker image, runs its entrypoint, launches Chromium (headless) inside it
+and checks that no `.env`, test suite or fixture was baked in. The CI launch is
+headless and fetches nothing; that the image can fetch with a window was
+checked by hand on 2026-11-10 (the image starts its own virtual display with
+`xvfb-run` under `tini`, so `docker run --init` is not needed).
 
 **What the canary badge here means.** The workflow is a real three-page run
 against a real category URL, with a floor on the rows, the reserve invariant,

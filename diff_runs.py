@@ -45,6 +45,7 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 from output_writer import UNIQUE_BY_SKU_MODES
+from product_parser import listing_identity
 
 # `sold` is tracked alongside the price, and `sold_is_floor` with it, because
 # without the flag a `sold` change is unreadable: a tile's figure is a floor
@@ -271,6 +272,14 @@ def _run_status(path: str) -> Tuple[Optional[str], Optional[dict]]:
     return meta.get("status"), meta
 
 
+def _describe(identity) -> str:
+    """A listing identity as a short human phrase."""
+    if not identity:
+        return "unknown"
+    kind, key = identity
+    return f"{kind} {key}" if key else kind
+
+
 def _check_comparable(args) -> bool:
     """Refuse an assortment diff between runs that are not both complete.
 
@@ -283,10 +292,15 @@ def _check_comparable(args) -> bool:
     """
     problems = []
     modes = {}
+    identities = {}
+    incomplete = False
     for label, path in (("--old", args.old), ("--new", args.new)):
         status, meta = _run_status(path)
         if status is None:
             continue  # no sidecar: nothing to check, see _run_status
+        start_url = (meta or {}).get("start_url")
+        if start_url:
+            identities[label] = listing_identity(start_url)
         mode = (meta or {}).get("mode")
         if mode:
             modes[label] = mode
@@ -302,10 +316,19 @@ def _check_comparable(args) -> bool:
                 f"per sku. This tool diffs one row per sku on price, so there "
                 f"is nothing here it can compare.")
         if status != "complete":
+            incomplete = True
             problems.append(
                 f"{label} ({path}) was a {status!r} run — stopped after "
                 f"{meta.get('pages_completed')} of {meta.get('pages_requested')} "
                 f"page(s), reason {meta.get('stop_reason')!r}")
+    known = {k: v for k, v in identities.items() if v}
+    if len(set(known.values())) > 1:
+        problems.append(
+            f"the two runs were gathered from different listings "
+            f"({_describe(known.get('--old'))} vs {_describe(known.get('--new'))}; "
+            f"each .meta.json records its start_url). Every lot present in "
+            f"one and not the other would be reported as added or removed, "
+            f"when they are simply two different catalogues.")
     if len(set(modes.values())) > 1:
         problems.append(
             f"the two runs are different modes ({modes}). A listing row and a "
@@ -360,9 +383,15 @@ def _check_comparable(args) -> bool:
     print("[!] Refusing to diff these two runs:")
     for line in problems:
         print(f"      {line}")
-    print("    Re-run the incomplete side, or pass --force to compare anyway "
-          "(added/removed will include products that were simply never "
-          "fetched).")
+    if incomplete:
+        print("    Re-run the incomplete side, or pass --force to compare "
+              "anyway (added/removed will include products that were simply "
+              "never fetched).")
+    else:
+        print("    Compare two runs of the SAME listing in the same mode, or "
+              "pass --force to compare anyway (added/removed will then "
+              "describe the difference between the two requests, not a "
+              "change in the catalogue).")
     return False
 
 
