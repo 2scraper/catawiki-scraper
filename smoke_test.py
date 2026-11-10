@@ -1722,7 +1722,7 @@ def test_concurrent_dispatch(skips):
         eng._BrowserSession = lambda pw, args, pool, **kw: _FakeSession(pool)
         eng._fetch_one_page = fake_fetch
         try:
-            results, unattempted, exhausted = eng._fetch_pages_concurrently(
+            results, unattempted, exhausted, _early = eng._fetch_pages_concurrently(
                 Args(), None, specs, concurrency)
         finally:
             (eng.sync_playwright, eng._BrowserSession,
@@ -3126,6 +3126,309 @@ def test_no_private_citations():
     return ok
 
 
+def test_audit_2026_11_10(skips):
+    """Regressions from the 2026-11-10 third-party audit (22 findings).
+
+    Each check is a behaviour the audit saw fail on the live site, driven
+    through the real function rather than by reading its source.
+    """
+    group("audit 2026-11-10: page window, empty answers, lot image")
+    ok = True
+    cat = "https://www.catawiki.com/en/c/333-watches"
+    at99 = cat + "?page=99"
+
+    # --- 1, 2: the run's counter is not the site's page number
+    ok &= check("a run starting on page 99 names site page 100 as its 2nd page",
+                page_flow.site_page(at99, 2) == 100)
+    ok &= check("a run with no ?page= starts on site page 1",
+                page_flow.site_page(cat, 3) == 3)
+    ok &= check("--pages 3 from page 99 is cut to the 2 pages the site has",
+                page_flow.clamp_pages(at99, 3) == (2, True))
+    ok &= check("--pages 102 from page 1 is cut to 100 and says so",
+                page_flow.clamp_pages(cat, 102) == (100, True))
+    ok &= check("--pages 100 from page 1 is not cut",
+                page_flow.clamp_pages(cat, 100) == (100, False))
+    ok &= check("a start page past the cap has nothing to fetch",
+                page_flow.clamp_pages(cat + "?page=150", 2)[0] == 0)
+    ok &= check("planned URLs follow the SITE's numbering from the start page",
+                page_flow.planned_urls(at99, at99, 2) == [cat + "?page=100"])
+    ok &= check("planning never builds an address past the cap (no None)",
+                None not in page_flow.planned_urls(cat, cat, 100))
+    ok &= check("the page after the 1st of a run on page 99 is page 100",
+                page_flow.next_url(at99, at99, 1) == cat + "?page=100")
+    ok &= check("a redirect that drops ?page= does not send the run back to 2",
+                page_flow.next_url(at99, cat, 1) == cat + "?page=100")
+    ok &= check("...and the 2nd page of it has no successor (cap)",
+                page_flow.next_url(at99, cat + "?page=100", 2) is None)
+    ok &= check("the site's own link to page 100 agrees with a page-99 URL",
+                page_flow.pagination_agrees(at99, 1, [cat + "?page=100"]))
+
+    class _Parser:
+        def error(self, message):
+            raise ValueError(message)
+
+    class _A:
+        pass
+    a = _A(); a.mode, a.url, a.pages = "listing", at99, 5
+    page_flow.apply_page_cap(a, _Parser())
+    ok &= check("apply_page_cap clamps args.pages and records the request",
+                (a.pages, a.pages_requested, a.pages_capped_by_site) == (2, 5, True))
+    ok &= check("the sidecar facts say the cap was applied",
+                page_flow.run_extra(a) == {"start_page": 99,
+                                           "pages_capped_by_site": True,
+                                           "pages_requested_by_user": 5})
+    a = _A(); a.mode, a.url, a.pages = "listing", cat + "?page=150", 2
+    ok &= check("a start page past the cap is a usage error",
+                _raises(lambda: page_flow.apply_page_cap(a, _Parser())))
+    a = _A(); a.mode, a.url, a.pages = "lot", cat, 1
+    page_flow.apply_page_cap(a, _Parser())
+    ok &= check("--mode lot is never clamped", a.pages == 1)
+
+    # --- 5: an empty page inside the stated page count is a glitch
+    ok &= check("page 62 of a 100-page listing is expected to hold lots",
+                page_flow.empty_page_is_early(100, 62))
+    ok &= check("a page beyond the stated count is the real end",
+                not page_flow.empty_page_is_early(5, 6))
+    ok &= check("with no stated size an empty page is taken as the end",
+                not page_flow.empty_page_is_early(None, 3))
+
+    class _O:
+        def __init__(self, ok_, products):
+            self.ok, self.products = ok_, products
+    a = _A(); a.url = cat
+    calls = []
+    out, again = page_flow.recheck_early_empty(
+        a, 62, _O(True, []), 100, lambda: calls.append(1) or _O(True, ["row"]))
+    ok &= check("an early empty page is fetched once more and the rows are kept",
+                again and out.products == ["row"] and len(calls) == 1)
+    out, again = page_flow.recheck_early_empty(
+        a, 6, _O(True, []), 5, lambda: calls.append(1) or _O(True, ["row"]))
+    ok &= check("an empty page past the end is NOT fetched again",
+                not again and len(calls) == 1)
+    out, again = page_flow.recheck_early_empty(
+        a, 3, _O(True, ["row"]), 100, lambda: calls.append(1))
+    ok &= check("a page with rows is never fetched again",
+                not again and len(calls) == 1)
+
+    # --- 4: the site's own answers are not a block
+    not_found = ('<html><body><script id="__NEXT_DATA__" type="application/json">'
+                 '{"props":{"pageProps":{"locale":"en"}},"page":"/404",'
+                 '"buildId":"b1"}</script></body></html>')
+    empty_p2 = ('<html><body><script id="__NEXT_DATA__" type="application/json">'
+                '{"props":{"pageProps":{"searchLots":{"total":24,"lots":[],'
+                '"filters":[],"meta":{}},"currentPage":2}},'
+                '"page":"/s/[[...staticTerm]]","buildId":"b1"}</script></body></html>')
+    chromium_error = ('<html><head><title>www.catawiki.com</title></head><body>'
+                      'ERR_PROXY_CONNECTION_FAILED</body></html>')
+    ok &= check("the site's own Page Not Found is served-by-the-site",
+                served_by_catawiki(not_found))
+    ok &= check("...and reads as empty, not blocked (a withdrawn lot)",
+                detect_page_state(not_found, 200, cat + "/l/1-x") == "empty")
+    ok &= check("a search page 2 with an empty lots list reads as empty",
+                detect_page_state(empty_p2, 200, cat) == "empty")
+    ok &= check("Akamai's refusal is still blocked",
+                detect_page_state(BLOCKED_403, 403, cat) == "blocked")
+    ok &= check("Chromium's own error page is still blocked",
+                detect_page_state(chromium_error, None, cat) == "blocked")
+    ok &= check("a bare 39-byte blank DOM is still blocked",
+                detect_page_state("<html><head></head><body></body></html>",
+                                  None, cat) == "blocked")
+
+    # --- 6: lot image
+    lot = parse_lot_page(LOT_CLOSED, "https://www.catawiki.com/en/l/106583855-x")
+    ok &= check("a lot row carries its image (payload keys large/medium)",
+                bool(lot and (lot.image_url or "").startswith("https://assets.")))
+
+    # --- 13: search rows are labelled with their query
+    rows = parse_products(SEARCH_EN, "https://www.catawiki.com/en/s?q=rolex")
+    ok &= check("search rows carry the query as their category",
+                bool(rows) and {r.category for r in rows} == {"rolex"})
+    ok &= check("a category URL still labels its rows with the category",
+                {r.category for r in parse_products(LISTING_EN, cat)} == {"333-watches"})
+
+    # --- 14, 15
+    ok &= check("--mode auctions refuses a category URL",
+                page_flow.mode_url_mismatch("auctions", cat, "category") is not None)
+    ok &= check("--mode auctions accepts the auctions index",
+                page_flow.mode_url_mismatch("auctions", "https://www.catawiki.com/en/a",
+                                            "auctions") is None)
+    ok &= check("a missing --out folder is caught before any fetch",
+                page_flow.check_out_prefix("/nonexistent-dir-xyz/x") is not None)
+    ok &= check("a writable --out folder passes",
+                page_flow.check_out_prefix(os.path.join(tempfile.gettempdir(), "x")) is None)
+    from proxy_pool import load_proxy_file, ProxyError
+    try:
+        load_proxy_file("/nonexistent-dir-xyz/proxies.txt")
+        raised = None
+    except ProxyError as e:
+        raised = str(e)
+    except Exception as e:  # noqa: BLE001
+        raised = "WRONG TYPE %s" % type(e).__name__
+    ok &= check("a missing --proxy-file is a ProxyError (exit 2), not a traceback",
+                bool(raised) and "WRONG TYPE" not in raised)
+
+    # --- 16: an empty, finished run is complete, not failed
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "empty")
+        with redirect_stdout(io.StringIO()):
+            rc = finish_run([], prefix, "json", True, blocked=False,
+                            stop_reason="completed", pages_requested=1,
+                            pages_completed=1, start_url=cat, final_url=cat)
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        ok &= check("an empty COMPLETE run writes status complete (not failed)",
+                    meta["status"] == "complete" and meta["products"] == 0)
+        ok &= check("...and still exits 4 (zero lots)", rc == 4)
+        prefix = os.path.join(d, "dead")
+        with redirect_stdout(io.StringIO()):
+            finish_run([], prefix, "json", True, blocked=False,
+                       stop_reason="page_load_timeout", pages_requested=1,
+                       pages_completed=0, start_url=cat, final_url=cat,
+                       pages_failed=[1])
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        ok &= check("an empty run that did NOT finish is still failed",
+                    meta["status"] == "failed")
+
+    # --- 7: runs of different listings are not diffed
+    import diff_runs
+    with tempfile.TemporaryDirectory() as d:
+        def make(name, start_url):
+            path = os.path.join(d, name + ".json")
+            json.dump([], open(path, "w"))
+            json.dump({"status": "complete", "mode": "listing",
+                       "start_url": start_url,
+                       "pages_completed": 1, "pages_requested": 1},
+                      open(os.path.join(d, name + ".meta.json"), "w"))
+            return path
+
+        class _D:
+            force = False
+        args = _D()
+        args.old = make("a", cat)
+        args.new = make("b", "https://www.catawiki.com/en/s?q=rolex")
+        with redirect_stdout(io.StringIO()) as out:
+            refused = not diff_runs._check_comparable(args)
+        ok &= check("a category run and a search run are refused", refused)
+        ok &= check("...with the reason, not 'restart the incomplete side'",
+                    "different listings" in out.getvalue()
+                    and "Re-run the incomplete side" not in out.getvalue())
+        args.new = make("c", "https://www.catawiki.com/nl/c/333-horloges?page=5")
+        with redirect_stdout(io.StringIO()):
+            same = diff_runs._check_comparable(args)
+        ok &= check("page 5 of the same category (other locale) is comparable",
+                    same)
+
+    # --- 8, 9: a held Scraping Browser profile is retried, others are not
+    tries, naps = [], []
+
+    def flaky():
+        tries.append(1)
+        if len(tries) < 3:
+            raise RuntimeError("WebSocket error: HTTP 500 Internal Server Error")
+        return "connected"
+    with redirect_stderr(io.StringIO()):
+        try:
+            got = page_flow.retry_while_profile_busy(flaky, sleep=naps.append)
+        except Exception:  # noqa: BLE001 - a regression must FAIL, not crash
+            got = None
+    ok &= check("a 500 on connect is retried with a pause and then succeeds",
+                got == "connected" and len(tries) == 3 and len(naps) == 2)
+    naps.clear()
+
+    def refused():
+        raise RuntimeError("401 bad credentials")
+    ok &= check("a non-busy connect failure is raised at once, not retried",
+                _raises(lambda: page_flow.retry_while_profile_busy(
+                    refused, sleep=naps.append)) and not naps)
+    ok &= check("a port number containing 500 is not a busy profile",
+                not page_flow.profile_busy(RuntimeError("port 15000 refused")))
+
+    # --- 18: the fingerprint service's own reason reaches the user
+    import fingerprint_client as fpc
+
+    fake_key = "0123456789abcdef" * 2   # built, so no key-shaped literal exists
+
+    class _Resp:
+        status_code = 403
+        text = "{}"
+
+        def json(self):
+            return {"errorDescription": "No fingerprint plan on this account"}
+
+        def raise_for_status(self):
+            import requests
+            raise requests.HTTPError("403 for url key=%s" % fake_key)
+    saved_get = fpc.requests.get
+    fpc.requests.get = lambda *a, **k: _Resp()
+    try:
+        try:
+            fpc.get_fingerprint(fake_key, cache_dir=None)
+            message = ""
+        except fpc.FingerprintError as e:
+            message = str(e)
+    finally:
+        fpc.requests.get = saved_get
+    ok &= check("a 403 carries the service's reason (no plan on the account)",
+                "No fingerprint plan" in message)
+    ok &= check("...and never the key", fake_key not in message)
+
+    # --- 19, 17: the Scraper API client reads a lot, and shares flag names
+    import scraper_api_client as sac
+    saved_argv = sys.argv
+    try:
+        sys.argv = ["x", "--mode", "lot", "--url", cat, "--key", "k"]
+        with redirect_stderr(io.StringIO()):
+            try:
+                sac.parse_args()
+                exit_code = None
+            except SystemExit as e:
+                exit_code = e.code
+        ok &= check("Scraper API --mode lot refuses a category URL (exit 2)",
+                    exit_code == 2)
+        sys.argv = ["x", "--mode", "lot", "--twocaptcha-key", "k",
+                    "--cdp-endpoint", "ws://h:1",
+                    "--url", "https://www.catawiki.com/en/l/1-x"]
+        ns = sac.parse_args()
+        ok &= check("Scraper API accepts the browser engines' flag names",
+                    ns.key == "k" and ns.cdp_url == "ws://h:1" and ns.mode == "lot")
+    finally:
+        sys.argv = saved_argv
+
+    # --- 17: --min-score only takes what the API accepts
+    for engine_name in ("playwright_scraper", "selenium_scraper", "puppeteer_scraper"):
+        try:
+            eng = __import__(engine_name)
+        except ImportError as e:
+            skips.append("%s audit flags (%s)" % (engine_name, e))
+            continue
+        saved_argv = sys.argv
+        try:
+            sys.argv = ["x", "--url", cat, "--min-score", "0.5"]
+            with redirect_stderr(io.StringIO()):
+                try:
+                    eng.parse_args()
+                    code = None
+                except SystemExit as e:
+                    code = e.code
+            ok &= check("%s rejects --min-score 0.5" % engine_name, code == 2)
+            sys.argv = ["x", "--url", at99, "--pages", "3"]
+            with redirect_stderr(io.StringIO()):
+                parsed = eng.parse_args()
+            ok &= check("%s clamps --pages 3 from page 99 to 2" % engine_name,
+                        parsed.pages == 2 and parsed.pages_capped_by_site)
+            sys.argv = ["x", "--url", cat, "--out", "/nonexistent-dir-xyz/o"]
+            with redirect_stderr(io.StringIO()):
+                try:
+                    eng.parse_args()
+                    code = None
+                except SystemExit as e:
+                    code = e.code
+            ok &= check("%s refuses a missing --out folder up front" % engine_name,
+                        code == 2)
+        finally:
+            sys.argv = saved_argv
+    return ok
+
+
 def main() -> int:
     ok = True
     # Checks that could not run because an optional engine library is absent.
@@ -3175,6 +3478,7 @@ def main() -> int:
     ok &= test_numeric_flags_are_validated()
     ok &= test_credential_scan_is_relative_to_the_repo()
     ok &= test_no_private_citations()
+    ok &= test_audit_2026_11_10(skips)
 
     print()
     if _failures:

@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
+import time
 from typing import Callable, Dict, Iterable, List, Optional, Union
 from urllib.parse import urljoin, urlsplit
 
@@ -429,6 +431,11 @@ def mode_url_mismatch(mode: str, url: str, kind: str) -> Optional[str]:
     if mode == "lot" and kind != "lot":
         return (f"--mode lot expects a /{{loc}}/l/{{id}}-{{slug}} lot URL; "
                 f"{url!r} is a {kind or 'unrecognised'} page.")
+    if mode == "auctions" and kind != "auctions":
+        return (f"--mode auctions reads the auctions INDEX (/{{loc}}/a), one "
+                f"row per auction; {url!r} is a {kind or 'unrecognised'} "
+                f"page. To read one auction's lots use the default "
+                f"--mode listing on its /{{loc}}/a/{{id}}-{{slug}} URL.")
     if mode == "listing" and kind == "lot":
         return (f"{url!r} is a single lot page. Use --mode lot for it, or "
                 f"pass a category (/{{loc}}/c/{{id}}-{{slug}}), a search "
@@ -448,6 +455,22 @@ MODE_HELP = ("listing (default): a category, a search or a whole auction, "
              "specifications and the bid history. auctions: the auctions "
              "index as a work list, one row per auction, to feed back in "
              "as --url.")
+def check_out_prefix(prefix: str) -> Optional[str]:
+    """The usage error for an unwritable `--out`, or None.
+
+    Checked BEFORE the browser starts: the folder is only touched at the very
+    end of a run, so a missing one used to cost a whole run's rows.
+    """
+    import os
+    folder = os.path.dirname(os.path.abspath(prefix))
+    if not os.path.isdir(folder):
+        return (f"--out {prefix!r}: the folder {folder!r} does not exist. "
+                f"Create it first; nothing has been fetched.")
+    if not os.access(folder, os.W_OK):
+        return f"--out {prefix!r}: the folder {folder!r} is not writable."
+    return None
+
+
 PAGES_HELP = ("Listing pages to crawl (--mode listing on a category or a "
               "search; ?page=N, capped by the site at 100). Ignored in "
               "--mode lot and --mode auctions, and for a whole auction, "
@@ -530,9 +553,194 @@ def _as_hrefs(next_href: Union[str, Iterable[str], None]) -> List[str]:
     return [h for h in next_href if isinstance(h, str) and h]
 
 
+# A Scraping Browser profile allows ONE live connection. A run started right
+# after another one has closed can reach the endpoint before the profile is
+# released, and the service answers HTTP 500 for a few seconds (measured:
+# every second back-to-back run failed without a pause, 3 of 3 succeeded with
+# 15 s between them). Retrying the CONNECTION, with the reason in the log, is
+# what the README promised for a held profile and the engines did not do.
+CDP_CONNECT_ATTEMPTS = 4
+CDP_CONNECT_PAUSE_S = 10.0
+_PROFILE_BUSY_MARKERS = ("internal server error", "profile_locked",
+                         "profile is locked")
+
+
+def profile_busy(error: BaseException) -> bool:
+    """Whether a CDP connect failure looks like a profile still in use."""
+    text = str(error).lower()
+    # A bare "500" would also match a port or a byte count; require it as a
+    # whole word.
+    return (any(marker in text for marker in _PROFILE_BUSY_MARKERS)
+            or re.search(r"\b500\b", text) is not None)
+
+
+def retry_while_profile_busy(connect: Callable, is_busy: Callable = profile_busy,
+                             sleep: Callable = time.sleep,
+                             attempts: int = CDP_CONNECT_ATTEMPTS,
+                             pause_s: float = CDP_CONNECT_PAUSE_S):
+    """Call `connect()`, retrying only a failure that looks like a held profile.
+
+    Any other failure (bad credentials, a dead host) is raised at once: waiting
+    cannot fix it. The last busy failure is raised after `attempts` tries.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return connect()
+        except Exception as e:  # noqa: BLE001 - each engine raises its own types
+            if attempt == attempts or not is_busy(e):
+                raise
+            logger.warning(
+                "The remote browser refused the connection (%s) - the profile "
+                "is most likely still held by the previous connection. "
+                "Waiting %.0fs and trying again (%d/%d).",
+                str(e).splitlines()[0][:80] if str(e) else type(e).__name__,
+                pause_s, attempt, attempts - 1)
+            sleep(pause_s)
+
+
+def start_page(url: str) -> int:
+    """The site page a run's URL starts on (1 when it names none)."""
+    return page_number_from_url(url)
+
+
+def site_page(start_url: str, ordinal: int) -> int:
+    """The site's own page number of the run's `ordinal`-th page.
+
+    A run counts its pages 1, 2, 3... from wherever the URL starts, and the
+    site counts from 1 at the top of the listing. Every address, every
+    "is this past the cap" test and the `page` column must use the SITE's
+    number: using the run's own counter is what fetched page 3 after page 100
+    when a run started on page 99.
+    """
+    return start_page(start_url) + ordinal - 1
+
+
+def clamp_pages(url: str, pages: int):
+    """(pages that can really be fetched from `url`, whether the site's cap cut it).
+
+    The site addresses at most PAGE_CAP pages and answers a request past that
+    with the capped page's own lots under HTTP 200, so a run that asks for more
+    stops at the cap instead of asking. 0 means the start page is itself past
+    the cap: nothing can be fetched.
+    """
+    if not paginates_by_url(url):
+        return pages, False
+    room = PAGE_CAP - start_page(url) + 1
+    if room < 1:
+        return 0, True
+    return min(pages, room), pages > room
+
+
+def planned_urls(base_url: str, start_url: str, pages: int) -> List[str]:
+    """Addresses of the run's pages 2..`pages`, by the SITE's page number.
+
+    `base_url` is the address page 1 actually loaded as (it may have been
+    redirected), `start_url` is what the user typed and fixes the numbering.
+    """
+    return [page_url(base_url, site_page(start_url, n))
+            for n in range(2, pages + 1)]
+
+
+def apply_page_cap(args, parser) -> None:
+    """Clamp `--pages` to what the site will address, once, at startup.
+
+    A run that asked for more than the site serves used to plan page 101,
+    get `None` for its address, crash, and lose every row it had gathered.
+    It now stops at the cap, keeps them, and says so. A start page that is
+    itself past the cap is a usage error: the site would answer it with page
+    100's lots under HTTP 200.
+    """
+    args.pages_requested = args.pages
+    args.pages_capped_by_site = False
+    if args.mode != "listing":
+        return
+    pages, capped = clamp_pages(args.url, args.pages)
+    if pages == 0:
+        parser.error(
+            f"--url starts on page {start_page(args.url)}, past the site's "
+            f"cap of {PAGE_CAP}: a request that deep is answered with page "
+            f"{PAGE_CAP}'s own lots. Start on page {PAGE_CAP} or earlier.")
+    if capped:
+        logger.warning(
+            "--pages %d from page %d would run past the site's cap of %d "
+            "pages; fetching pages %d-%d and stopping there. The run status "
+            "records that the listing is longer than the site will address.",
+            args.pages, start_page(args.url), PAGE_CAP,
+            start_page(args.url), PAGE_CAP)
+        args.pages = pages
+        args.pages_capped_by_site = True
+
+
+def finalize_args(args, parser) -> None:
+    """Cross-flag checks every engine runs once, right after parsing."""
+    error = check_out_prefix(args.out)
+    if error:
+        parser.error(error)
+    apply_page_cap(args, parser)
+
+
+def run_extra(args) -> dict:
+    """Sidecar facts about the page window, shared by all three engines."""
+    extra = {}
+    if args.mode == "listing":
+        extra["start_page"] = start_page(args.url)
+        if getattr(args, "pages_capped_by_site", False):
+            extra["pages_capped_by_site"] = True
+            extra["pages_requested_by_user"] = args.pages_requested
+    return extra
+
+
+def next_url(start_url: str, current_url: str, ordinal: int) -> Optional[str]:
+    """Address of the page after the run's `ordinal`-th page.
+
+    Built from the run's start URL and the ordinal, not from whatever URL the
+    browser ended up on: a redirect that drops `?page=` must not send the run
+    back to page 2.
+    """
+    return page_url(current_url or start_url, site_page(start_url, ordinal + 1))
+
+
+def empty_page_is_early(listing_pages: Optional[int], page_number: int) -> bool:
+    """Whether an EMPTY page contradicts the listing's own stated size.
+
+    `listing_pages` is the page count page 1's payload stated. A page inside
+    it that came back with no rows is a glitch (one was served mid-run, on
+    page 62 of 100, and the next page was full), not the end of the listing.
+    Without a stated size there is nothing to contradict, so the empty page
+    is taken as the end.
+    """
+    return listing_pages is not None and page_number <= listing_pages
+
+
+def recheck_early_empty(args, page_num: int, outcome, listing_pages: Optional[int],
+                        refetch: Callable):
+    """(outcome, rechecked): fetch a suspiciously empty page once more.
+
+    A page that comes back with no rows INSIDE the page count the listing
+    itself stated is a site glitch, not the end of the results: one was served
+    on page 62 of 100 with the next page full, and the run called that the end
+    and reported itself complete with 1536 of 2400 rows. `refetch` asks for the
+    page once more; if it is still empty the caller stops AND says so.
+    """
+    if listing_pages is None or not (outcome.ok and not outcome.products):
+        return outcome, False
+    site_n = site_page(args.url, page_num)
+    if not empty_page_is_early(listing_pages, site_n):
+        return outcome, False
+    logger.warning("Page %d (site page %d) came back with no rows, but the "
+                   "listing states it has %d page(s) — fetching it once more "
+                   "before treating that as the end.", page_num, site_n,
+                   listing_pages)
+    return refetch(), True
+
+
 def pagination_agrees(current_url: str, page_num: int,
                       next_href: Union[str, Iterable[str], None]) -> bool:
     """Whether the site's own next link matches what the convention builds.
+
+    The page after `current_url` is read off the URL itself; `page_num` is
+    kept for callers and no longer decides it (a run starting on page 99 has
+    no page "1" to count from).
 
     True when ANY advertised link agrees. A listing page carries links to
     several of its own pages -- 2, 3 and the last -- and the question here is
@@ -542,7 +750,7 @@ def pagination_agrees(current_url: str, page_num: int,
     hrefs = _as_hrefs(next_href)
     if not hrefs:
         return True
-    want = page_url(current_url, page_num + 1)
+    want = page_url(current_url, page_number_from_url(current_url) + 1)
     if not want:
         return False
     target = comparable(want)

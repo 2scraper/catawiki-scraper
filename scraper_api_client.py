@@ -50,9 +50,10 @@ from typing import Optional
 
 import requests
 
-from product_parser import (parse_products, detect_bot_challenge,
+from product_parser import (parse_products, parse_lot_page, auction_rows,
+                            listing_kind, detect_bot_challenge,
                             detect_page_state, BOT_CHALLENGE_MARKERS)
-from output_writer import save
+from output_writer import save, ROW_CLASS_BY_MODE
 import env_config
 import page_flow
 
@@ -276,7 +277,16 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
                      "puppeteer_scraper.py directly.")
         return 3
 
-    products = parse_products(html, args.url, category=args.category)
+    if args.mode == "lot":
+        # One lot page: the Scraper API returns the page with its own
+        # __NEXT_DATA__ payload, which carries the whole lot, so it reads here
+        # exactly as it does in the browser engines.
+        row = parse_lot_page(html, args.url, category=args.category)
+        products = [row] if row else []
+    elif args.mode == "auctions":
+        products = auction_rows(html, args.url)
+    else:
+        products = parse_products(html, args.url, category=args.category)
     logger.info("Parsed %d products.", len(products))
 
     if not products:
@@ -287,34 +297,39 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
                        "what actually came back.", dump)
         return 4
 
-    return save(products, args.out, args.format, allow_empty=args.allow_empty)
+    return save(products, args.out, args.format, allow_empty=args.allow_empty,
+                row_cls=ROW_CLASS_BY_MODE.get(args.mode))
 
 
 def parse_args():
     p = argparse.ArgumentParser(
         description="Catawiki auction scraper — 2captcha Scraper API edition (no "
-                    "local browser). NOTE: these pages DO need JavaScript, "
-                    "and their grid hydrates only as the page is scrolled, "
-                    "so a single fetch returns about 5 products where a "
-                    "browser engine returns 60. Pass --cdp-url to reach the "
-                    "site at all; see this file's docstring for the measured "
-                    "numbers, and prefer playwright_scraper.py.")
+                    "local browser). One request returns one page: a category or "
+                    "search page carries all 24 of its lots, but their prices and "
+                    "bid counts are filled in by the page's own scripts and arrive "
+                    "empty (measured 2026-09-11), so use this for ids, titles and "
+                    "urls; a lot page (--mode lot) carries its whole payload. The "
+                    "plain request is served without --cdp-url; see this "
+                    "file's docstring for the numbers, and prefer "
+                    "playwright_scraper.py when you need bids.")
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
-    p.add_argument("--key", default=os.environ.get("TWOCAPTCHA_KEY"),
+    p.add_argument("--key", "--twocaptcha-key", dest="key", default=os.environ.get("TWOCAPTCHA_KEY"),
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
                    help="A Catawiki listing URL, e.g. a category "
                         "/{loc}/c/{id}-{slug}. Required, unless "
                         "CATAWIKI_URL is set in the environment or in .env.")
+    p.add_argument("--mode", choices=["listing", "lot", "auctions"],
+                   default="listing", help=page_flow.MODE_HELP)
     p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="catawiki_products_scraperapi", help="Output file prefix")
     p.add_argument("--timeout", type=int, default=60,
                    help=f"API-side task timeout in seconds (1-{MAX_API_TIMEOUT}, default 60)")
-    p.add_argument("--cdp-url", default=None,
+    p.add_argument("--cdp-url", "--cdp-endpoint", dest="cdp_url", default=None,
                    help="Route the fetch through an existing browser session over CDP "
                         "(sent as the API's `cdpurl` param), e.g. ws://user:pass@host:port")
     wait = p.add_mutually_exclusive_group()
@@ -348,6 +363,10 @@ def parse_args():
     if not args.url:
         p.error("no --url given, and CATAWIKI_URL is not set in the environment "
                 "or in .env.")
+    mismatch = page_flow.mode_url_mismatch(args.mode, args.url,
+                                           listing_kind(args.url))
+    if mismatch:
+        p.error(mismatch)
     return args
 
 
