@@ -40,6 +40,7 @@ Found by a third-party audit on 2026-11-10 and reproduced against `main` the sam
 
 ### Changed
 
+- CI only: the offline-checks job runs on `ubuntu-24.04` instead of `ubuntu-latest`, which moved to Ubuntu 26.04, where `actions/setup-python` has no Python 3.9 build. 3.9 stays the supported floor.
 - CI only: the scheduled canary now starts at 06:27 UTC (Mondays) instead of 06:23, so canaries that share one Scraping Browser profile no longer start at the same time and lock each other out.
 - CI only: the canary now runs weekly (Mondays 06:23 UTC) instead of daily, and on a manual dispatch.
 
